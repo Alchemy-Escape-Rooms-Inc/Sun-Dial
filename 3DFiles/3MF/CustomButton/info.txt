@@ -1,0 +1,14 @@
+-This custom button 3D print serves as a shield/housing for SPST push button
+in the Sun-Dial design. 
+
+1) The push button goes in the center and is secured using the nut it comes with.
+
+2) Add M2 threaded inserts 6mm in length into the guide pins' centers (which will 
+allow you to mount the pins to the 3D printed top). 
+
+3) Fit the guide pins through the custom button 3D printed base and add the springs
+over them. (Springs: 7.5mm diameter, 10mm length)
+
+4) Add the top over the guide pins and proceed to secure the assembly using M2 screws.
+
+5) The custom button is now ready to be mounted onto the Sun Dial prop.
