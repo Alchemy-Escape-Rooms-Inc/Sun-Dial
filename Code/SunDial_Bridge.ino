@@ -13,22 +13,27 @@
 //    Arduino GND             ──► ESP32 GND  (shared ground required)
 //
 //  MQTT Topics (publish):
-//    MermaidsTale/SunDial/status   – ONLINE, HEARTBEAT, progress, SOLVED
+//    MermaidsTale/SunDial/status   – ONLINE, HEARTBEAT, "<Symbol> Correct",
+//                                    "<Symbol> Clear", SOLVED
 //    MermaidsTale/SunDial/log      – mirrored serial output
 //    MermaidsTale/MonkeyDoorsTotems/command – sundialTotemOn/Off
 //
 //  MQTT Topics (subscribe):
-//    MermaidsTale/SunDial/command  – PING | STATUS | RESET | PUZZLE_RESET
+//    MermaidsTale/SunDial/command  – PING | STATUS | RESET | PUZZLE_RESET | CLEAR_STATUS
+//
+//  Symbols (HOUSE_1..5): Bottle, Crab, Turtle, Coconut, Trident
+//  NOTE: This bridge only mirrors HOUSE pin state from the Arduino.
+//        The actual answer values live in Sand_dial_new_boards_FINAL.ino.
 // ============================================================
 
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-#define FW_VERSION "2.0.0"
+#define FW_VERSION "2.1.0"
 
 // ── WiFi ─────────────────────────────────────────────────────
 const char* WIFI_SSID = "AlchemyGuest";
-const char* WIFI_PASS = "YourPassword";
+const char* WIFI_PASS = "VoodooVacation5601";
 
 // ── MQTT ─────────────────────────────────────────────────────
 const char*    MQTT_HOST    = "10.1.10.115";
@@ -44,7 +49,7 @@ const int NUM_CONDITIONS = 5;
 const int HOUSE_PINS[NUM_CONDITIONS] = { 4, 5, 6, 7, 15 };
 
 const char* CONDITION_LABELS[NUM_CONDITIONS] = {
-  "Bottle", "Seahorse", "Coconut", "Trident", "Skull"
+  "Bottle", "Crab", "Turtle", "Coconut", "Trident"
 };
 
 // ── Timing ───────────────────────────────────────────────────
@@ -124,7 +129,17 @@ void publishStatusReply() {
   Serial.printf("[MQTT] %s\n", buf);
 }
 
+void publishConditionStatus(int idx, bool correct) {
+  char buf[48];
+  snprintf(buf, sizeof(buf), "%s %s",
+           CONDITION_LABELS[idx], correct ? "Correct" : "Clear");
+  mqtt.publish(TOPIC_STAT, buf);
+  Serial.printf("[MQTT] %s\n", buf);
+}
+
 void publishProgress() {
+  // Kept for STATUS replies / heartbeats — emits a one-shot summary.
+  // Per-symbol Correct/Clear is handled by publishConditionStatus().
   char buf[64];
   snprintf(buf, sizeof(buf), "PROGRESS:%d/%d:%s",
            progressCount(), NUM_CONDITIONS, stateString());
@@ -186,6 +201,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     logLine("[CMD] PUZZLE_RESET — clearing state");
     resetPuzzleState();
     publishProgress();
+
+  } else if (strcmp(msg, "CLEAR_STATUS") == 0) {
+    mqtt.publish(TOPIC_STAT, "OK");
+    logLine("[CMD] CLEAR_STATUS — wiping retained status");
+    clearSolvedRetained();
   }
 }
 
@@ -267,15 +287,14 @@ void loop() {
         snprintf(line, sizeof(line), "[PIN] %s -> %s",
           CONDITION_LABELS[i], raw ? "CORRECT" : "cleared");
         logLine(line);
+        publishConditionStatus(i, raw);
       }
     }
   }
 
-  // ── Publish progress on every change, handle solve edge ───
+  // ── Handle solve edge ─────────────────────────────────────
   if (anyChange) {
     bool allSolved = (progressCount() == NUM_CONDITIONS);
-
-    publishProgress();
 
     if (allSolved && !solvedPublished) {
       puzzleSolved    = true;
