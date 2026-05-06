@@ -1,0 +1,221 @@
+Session start: 2026-05-03
+
+Files reviewed:
+- Sun-Dial/Code/SunDial_Bridge.ino  (ESP32-S3 MQTT bridge, FW 2.1.0)
+- Sun-Dial/Code/Sand_dial_new_boards_FINAL.ino  (Arduino controller)
+
+Issue investigated:
+  User reported that three HOUSE pins were going HIGH on correct selections
+  but the ESP32 bridge was not registering symbols as solved (SOLVED never
+  fired, totem never lit).
+
+Root cause:
+  Sand_dial_new_boards_FINAL.ino was pulsing each HOUSE_n pin HIGH for ~2 s
+  on a correct selection and then driving it LOW again inside the same
+  block (lines 456, 472, 489, 505, 523). The bridge requires all five
+  HOUSE pins HIGH simultaneously to publish SOLVED, so the brief pulses
+  meant only one symbol was ever HIGH at a time. On the bridge side the
+  user would have seen "<Symbol> Correct" immediately followed by
+  "<Symbol> Clear" on MermaidsTale/SunDial/status / .../log.
+
+Changes made:
+  Sand_dial_new_boards_FINAL.ino — removed the per-symbol
+  digitalWrite(HOUSE_n, LOW) in each of the five correct-answer blocks
+  so the pins now latch HIGH after a correct selection. The existing
+  puzzle-completion reset block (lines 567-572) still drives all five
+  HOUSE pins LOW once the full puzzle has been solved, which is the
+  intended clear point.
+
+Additional fix:
+  Line 572 of Sand_dial_new_boards_FINAL.ino had a duplicated
+  digitalWrite(HOUSE_5, LOW). Changed to HOUSE_6 so the wrong-answer
+  pin is also cleared during the puzzle-completion reset block.
+
+SunDial_Bridge.ino rewrite (FW 3.0.0):
+  Per user request, simplified the bridge to its bare essentials.
+  Removed: debounce, heartbeat, progress publishing, status replies,
+  log topic mirroring, retained SOLVED, PUZZLE_RESET / STATUS /
+  CLEAR_STATUS commands, and the per-symbol Clear messages.
+  New behavior: poll each HOUSE pin; on rising edge publish
+  "<Symbol> Correct"; when all 5 are HIGH publish SOLVED +
+  sundialTotemOn, then auto-reset internal state. Commands kept:
+  PING (-> PONG) and RESET (clears internal state + sundialTotemOff).
+
+Flash:
+  Compiled with FQBN esp32:esp32:esp32s3 (ESP32S3 Dev Module).
+  Sketch placed in Sun-Dial/Code/SunDial_Bridge/SunDial_Bridge.ino
+  (arduino-cli requires sketch folder name to match .ino filename;
+  the original Code/ folder also held two unrelated .ino files which
+  would have been merged into the build).
+  Uploaded to COM4 (the S3 had re-enumerated from COM5). 872 KB
+  written and verified, hard reset successful.
+
+Open items / unverified:
+  - SOLVED behavior on the wire — the rewrite was not exercised
+    against the live Arduino after flash. Confirm next session that
+    a rising edge on each HOUSE pin produces "<Symbol> Correct" once
+    (no "Clear" follow-up) and that all five HIGH triggers SOLVED +
+    sundialTotemOn.
+  - Topic alignment with Unreal Engine and AI Character programs not
+    cross-checked this session (CLAUDE.md requirement).
+
+MQTT topic alignment check:
+  SunDial_Bridge.ino publishes to:
+    MermaidsTale/SunDial/status
+    MermaidsTale/SunDial/log
+    MermaidsTale/MonkeyDoorsTotems/command  (sundialTotemOn / sundialTotemOff)
+  And subscribes to:
+    MermaidsTale/SunDial/command
+  Did not cross-check the Unreal / AI Character side this session.
+
+Next steps:
+  - Reflash the Arduino with the updated Sand_dial_new_boards_FINAL.ino.
+  - Run the puzzle and confirm the bridge publishes one
+    "<Symbol> Correct" per correct selection without the immediate
+    "<Symbol> Clear", and that SOLVED + sundialTotemOn fire on the 5th
+    correct symbol.
+  - Optionally fix the line 572 HOUSE_5 / HOUSE_6 typo.
+  - Optionally cross-check MQTT topic names against the Unreal Engine
+    project and AI Character program (CLAUDE.md requirement).
+
+----------------------------------------------------------------
+Session start: 2026-05-04
+
+Note on layout:
+  Project tree appears to have moved from C:\Users\Alchemy\Sun-Dial\
+  to C:\Users\Alchemy\repos\Sun-Dial\ between sessions. Other
+  hardware projects (CoveDoor, MonkeyDoors, JungleDoor, etc.) also
+  now live under C:\Users\Alchemy\repos\.
+
+User report:
+  Symbol-to-pin mapping in the Arduino is not what we documented
+  (e.g. bottle came out on pin 5, crab on pin 4, coconut on pin 7).
+  Trying to chase down the right per-pin labels is not worth it —
+  for the bridge's purposes the labels don't matter, only the count
+  of distinct pins that have fired.
+
+SunDial_Bridge.ino rewrite (FW 3.1.0):
+  - Order-independent: any of the 5 input pins going HIGH counts as
+    one correct answer.
+  - Per-pin dedupe: each pin can only contribute once per round, so
+    the Arduino re-pulsing the same pin won't double-count.
+  - Status messages now read "Correct N/5" instead of "<Symbol>
+    Correct" since the symbol identities are no longer trusted.
+  - Win condition unchanged: 5 distinct pins HIGH -> publish SOLVED
+    and sundialTotemOn, then auto-reset.
+  - Commands unchanged: PING -> PONG, RESET -> clear state +
+    sundialTotemOff.
+
+Flash:
+  Compiled and uploaded with FQBN esp32:esp32:esp32s3 to COM4.
+  872 KB written and verified, hard reset successful.
+
+Open items:
+  - Live-test that each of the 5 pins, when pulsed by the Arduino,
+    produces exactly one "Correct N/5" message and that the 5th
+    distinct pin triggers SOLVED + sundialTotemOn.
+  - If we ever do want symbol names back, easiest path is to
+    reverse-engineer the actual Arduino pin assignments and update
+    the SYMBOLS[] array — but per user direction, not pursuing this
+    for now.
+
+----------------------------------------------------------------
+Session start: 2026-05-06
+
+User report:
+  Even with FW 3.1.0 (any-pin-counts, dedupe), the bridge consistently
+  reads only 4 of the 5 correct selections. The 5th is never seen.
+  All five Arduino HOUSE_n outputs do go HIGH on a correct guess
+  (verified at the Arduino), so the failure is on the bridge's
+  read path, not the Arduino's drive.
+
+Earlier this session we briefly tested an alternative approach
+(local edit to Sand_dial_new_boards_FINAL.ino removing per-symbol
+digitalWrite(HOUSE_n, LOW) so pins latched HIGH instead of pulsing)
+plus FW 3.2.0 with INPUT_PULLDOWN, debounce, and a wait-for-LOW
+re-arm. That work was not flashed. User decided to revert to the
+original LOW->HIGH->LOW pulse semantics and instead fix the bridge
+so it cannot miss any pulse.
+
+Hypothesis for why pin 5 specifically is missed:
+  Bridge loop() called ensureWiFi() and ensureMqtt() at the top of
+  every iteration. If WiFi or MQTT hiccups during the 2 s HIGH
+  window of any single correct symbol, the bridge would return from
+  ensureMqtt() (up to 3 s blocking in FW 3.1.0) AFTER the pin had
+  already gone LOW, so the rising edge was simply never sampled.
+  The 5th correct symbol is statistically the one most likely to
+  hit one of those windows after the previous four have fired.
+
+Changes made:
+
+  Sand_dial_new_boards_FINAL.ino
+    Reverted to the original LOW->HIGH->LOW pulse semantics for the
+    five correct-answer blocks (this is what the file was at HEAD).
+    Fixed the long-standing duplicated digitalWrite(HOUSE_5, LOW)
+    on line 572 -> now correctly resets HOUSE_6.
+    Fixed line 301: light_show() ended with
+    digitalWrite(HOUSE_6, HIGH) and no matching LOW, leaving the
+    wrong-answer line latched HIGH every time the attract light
+    show finished. Changed HIGH -> LOW so the pin returns to its
+    idle state at the end of the light show. (Unrelated to the
+    missing-5th-pin issue, but a real bug.)
+
+  SunDial_Bridge/SunDial_Bridge.ino  (FW 3.2.0)
+    Rewritten to use rising-edge interrupts (attachInterrupt RISING)
+    on all five HOUSE pins. The ISRs only set a volatile
+    pendingEdge[i] flag; loop() drains those flags and publishes
+    "Correct N/5". This means a pulse can no longer be missed even
+    if WiFi/MQTT block the main loop for several seconds.
+
+    Other improvements:
+      - INPUT_PULLDOWN on all five inputs (prevents floating-input
+        false HIGHs, especially during boot before the Arduino has
+        run its initial pinMode + digitalWrite LOW).
+      - ensureWiFi has a 10 s timeout instead of looping forever.
+      - ensureMqtt no longer sleeps 3 s on failure; it just retries
+        on the next loop pass so we keep servicing pin events.
+      - On SOLVED, after publishing, the bridge waits up to 8 s for
+        all pins to read LOW before re-arming, so a stale HIGH
+        cannot immediately re-latch a pin in the next round.
+      - Order-independent counting and per-pin dedupe preserved
+        from FW 3.1.0.
+
+Not yet flashed.
+
+Open items / next steps:
+  - Compile and flash the Arduino with the reverted+fixed
+    Sand_dial_new_boards_FINAL.ino.
+  - Compile and flash the ESP32-S3 with FW 3.2.0
+    (Sun-Dial/Code/SunDial_Bridge/SunDial_Bridge.ino).
+    arduino-cli FQBN esp32:esp32:esp32s3, port likely COM4.
+  - Live-test: confirm that each of the 5 correct selections produces
+    exactly one "Correct N/5" message (1/5..5/5) and that the 5th
+    triggers SOLVED + sundialTotemOn. Specifically watch for the 5th
+    pin event reliably appearing across multiple plays.
+  - If the 5th pin is STILL missed after this change, the next thing
+    to investigate is hardware: the level-shifter / divider on that
+    specific line, GPIO15 quirks on the ESP32-S3, and whether that
+    input has been damaged by prolonged 5 V drive.
+
+GPIO15 ESP32-S3 research (corrects earlier note about strapping):
+  - GPIO15 is NOT a strapping pin on the ESP32-S3. Strapping pins
+    on the S3 are GPIO 0, 3, 45, 46. GPIO15 was a strapping pin
+    (MTDO / ROM debug) on the original ESP32 only.
+  - GPIO15 outputs LOW for ~60 us during power-up (chip-level
+    glitch). Harmless for our case since we are reading, not
+    driving.
+  - GPIO15 is ADC2_CH4. ADC2 conflicts with WiFi, but ONLY for
+    analog reads. digitalRead / attachInterrupt are unaffected.
+  - GPIO15 is not USB or JTAG on the S3.
+  - Therefore GPIO15 is electrically fine for INPUT_PULLDOWN +
+    RISING-edge interrupts with WiFi running.
+  - Remaining hardware suspects for the missing 5th pin (in order):
+      1. board-specific routing — check the dev board schematic
+         for anything tied to GPIO15 (LED, divider, shared net).
+      2. level shifter / divider on the wire to GPIO15.
+      3. damaged input from prolonged 5 V abuse — easy test:
+         physically swap the GPIO15 wire with a known-good pin
+         (e.g. GPIO16 or GPIO17) and update HOUSE_PINS[] to match.
+         If the previously-working pin now misses, GPIO15 is fine
+         and the issue is upstream wiring. If GPIO15 still misses,
+         the input is damaged.

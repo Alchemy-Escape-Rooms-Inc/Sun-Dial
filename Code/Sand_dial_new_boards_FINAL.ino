@@ -298,7 +298,7 @@ for (int l = 0; l < number_of_colors ; l++){       // choose color from array   
   }
   }
 
-  digitalWrite(HOUSE_6, HIGH);
+  digitalWrite(HOUSE_6, LOW);
 }
 
 
@@ -569,7 +569,7 @@ bool correct = 0;
                   digitalWrite (HOUSE_3, LOW);
                   digitalWrite (HOUSE_4, LOW);
                   digitalWrite (HOUSE_5, LOW);
-                  digitalWrite (HOUSE_5, LOW);
+                  digitalWrite (HOUSE_6, LOW);
                   
                   break_from_lightshow = 0;
                   light_show ();
