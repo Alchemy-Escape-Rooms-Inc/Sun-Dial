@@ -197,6 +197,60 @@ Open items / next steps:
     specific line, GPIO15 quirks on the ESP32-S3, and whether that
     input has been damaged by prolonged 5 V drive.
 
+Post-flash live-test result (FW 3.2.0):
+  Even with ISR-based reads, the bridge still misses one pin
+  consistently. Trident-first test (solve trident before any
+  other symbol) confirmed the fail follows the trident, NOT the
+  position-in-time. So this is a per-pin failure, not a
+  loop-blocking failure.
+
+Corrected symbol-to-pin mapping (per user, ground truth):
+    Bottle  -> HOUSE_1 -> Arduino D2 -> ESP32 GPIO 4   OK
+    Crab    -> HOUSE_2 -> Arduino D3 -> ESP32 GPIO 5   OK
+    Turtle  -> HOUSE_3 -> Arduino D4 -> ESP32 GPIO 6   OK
+    Coconut -> HOUSE_4 -> Arduino D5 -> ESP32 GPIO 7   OK
+    Trident -> HOUSE_5 -> Arduino D6 -> ESP32 GPIO 15  FAIL
+
+  Code comments inside Sand_dial_new_boards_FINAL.ino are
+  misleading about which symbol matches which board address;
+  trust the user-supplied mapping above. The previous session's
+  log already noted "bottle came out on pin 5, crab on pin 4,
+  coconut on pin 7" -- meaning the pwmBoard PWM addresses don't
+  follow the same order as the HOUSE_n outputs. The HOUSE_n
+  outputs themselves are what we care about for the bridge.
+
+So the missing-pin failure is on the trident path:
+    Arduino D6 -> wire -> level shifter -> ESP32 GPIO 15
+
+User cannot probe with a meter because the dials cover the
+boards and the puzzle does not run with the dials lifted. So
+diagnosis must be entirely software-driven.
+
+Diagnostic added (2026-05-06):
+  Sand_dial_new_boards_FINAL.ino, trident block (HOUSE_5):
+  Added Serial.println("HOUSE_5 HIGH (trident) - D6") right
+  after digitalWrite HIGH, and the matching LOW print before
+  turn_bezel_white(). Serial.begin(115200) is already in setup
+  (line 167) so the prints will appear on the Nano's USB.
+
+  Procedure: open the Arduino IDE Serial Monitor (or any 115200
+  terminal) on the Nano's USB port, play the puzzle, hit
+  trident, watch for the HIGH/LOW lines.
+
+  Three possible outcomes:
+    a) Both prints appear, bridge does NOT see trident:
+       Arduino is firing D6, failure is on the wire or the
+       ESP32 GPIO15 input. Next step: physically swap the
+       trident wire on the ESP32 from GPIO15 to GPIO16 (or 17)
+       and update HOUSE_PINS[] in the bridge to match.
+    b) Both prints appear, bridge DOES see trident:
+       FW 3.2.0 fixed it after all and the test ordering was
+       confused. Move on.
+    c) No prints appear:
+       Arduino logic isn't reaching the trident block. But the
+       puzzle does count it as correct, so this is unlikely
+       unless Serial.begin somehow failed to take.
+
 GPIO15 ESP32-S3 research (corrects earlier note about strapping):
   - GPIO15 is NOT a strapping pin on the ESP32-S3. Strapping pins
     on the S3 are GPIO 0, 3, 45, 46. GPIO15 was a strapping pin

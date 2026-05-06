@@ -510,19 +510,20 @@ bool correct = 0;
        
                                if (outer_choice == correct_outer_5 && inner_choice == correct_inner_5){
                                   digitalWrite (HOUSE_5, HIGH);
-                                  
-                                  
-                                  turn_bezel_green (); 
+                                  Serial.println("HOUSE_5 HIGH (trident) - D6");
+
+                                  turn_bezel_green ();
                                   delay (2000);
-                        
+
                                   turn_bezel_off ();
-                                  
+
                                   pwmBoard [1].setPWM (10 , 0, 4080);     // second board, address 10 full power  (green)  skull
                                   previous_condition_5 = 1;
                                   correct = 1;
                                   digitalWrite (HOUSE_5, LOW);
-                                  turn_bezel_white ();  
-                                  turn_former_greens_on ();}         
+                                  Serial.println("HOUSE_5 LOW (trident) - D6");
+                                  turn_bezel_white ();
+                                  turn_former_greens_on ();}
           
          
           if (correct == 0){
