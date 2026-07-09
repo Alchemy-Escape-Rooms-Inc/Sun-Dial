@@ -35,10 +35,10 @@
 //    MermaidsTale/SunDial/Trident   "true" | "false"
 //
 //  MQTT topics (publish, not retained):
-//    MermaidsTale/SunDial/status    ONLINE, HEARTBEAT, STATUS, OK, PONG
+//    MermaidsTale/SunDial/status    ONLINE, HEARTBEAT, STATUS, OK
 //    MermaidsTale/SunDial/log       mirrored serial output
 //
-//  MQTT topics (subscribe):
+//  MQTT topics (subscribe; PONG is answered back on this topic):
 //    MermaidsTale/SunDial/command   PING | STATUS | RESET |
 //                                    PUZZLE_RESET | CLEAR_STATUS
 // ============================================================
@@ -46,7 +46,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-#define FW_VERSION "4.1.0"
+#define FW_VERSION "4.1.1"
 
 const char* WIFI_SSID = "AlchemyGuest";
 const char* WIFI_PASS = "VoodooVacation5601";
@@ -138,7 +138,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   memcpy(msg, payload, min((unsigned int)31, length));
 
   if (strcmp(msg, "PING") == 0) {
-    mqtt.publish(TOPIC_STAT, "PONG");
+    // WatchTower protocol: PONG goes back on /command, the same topic
+    // the PING arrived on. Our own subscription echoes it back to us;
+    // it matches no command so the callback ignores it.
+    mqtt.publish(TOPIC_CMD, "PONG");
     Serial.println("[MQTT] PONG");
   } else if (strcmp(msg, "STATUS") == 0) {
     publishStatus();
