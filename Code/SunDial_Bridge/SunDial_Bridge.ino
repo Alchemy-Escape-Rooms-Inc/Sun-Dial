@@ -46,7 +46,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-#define FW_VERSION "4.1.1"
+#define FW_VERSION "4.2.0"
 
 const char* WIFI_SSID = "AlchemyGuest";
 const char* WIFI_PASS = "VoodooVacation5601";
@@ -70,8 +70,21 @@ const char* const SYMBOL_TOPICS[NUM_PINS] = {
 
 const unsigned long HEARTBEAT_INTERVAL_MS = 300000UL;  // 5 minutes
 
+// Glitch rejection (added 4.2.0). Wire logs on 2026-07-09 show phantom
+// edges on several pins at once right at power-on (18:03:10: three
+// symbols "true" 60ms after boot) — electrical noise while the Arduino
+// side powers up, not guest input.
+//   - Edges within BOOT_EDGE_MASK_MS of boot are discarded outright.
+//   - Any other edge must still read HIGH after EDGE_CONFIRM_MS before
+//     it is published. Real pulses hold ~2s; noise doesn't survive 30ms.
+const unsigned long BOOT_EDGE_MASK_MS = 3000;
+const unsigned long EDGE_CONFIRM_MS   = 30;
+
 // Set HIGH by the ISR on a rising edge. Cleared by loop() once consumed.
 volatile bool pendingEdge[NUM_PINS] = { false, false, false, false, false };
+
+// millis() when a drained edge started its confirm window; 0 = none.
+unsigned long edgeSeenMs[NUM_PINS] = { 0, 0, 0, 0, 0 };
 
 unsigned long bootMs = 0;
 unsigned long lastHeartbeatMs = 0;
@@ -128,6 +141,7 @@ void resetSymbols() {
   noInterrupts();
   for (int i = 0; i < NUM_PINS; i++) pendingEdge[i] = false;
   interrupts();
+  for (int i = 0; i < NUM_PINS; i++) edgeSeenMs[i] = 0;
   wipeRetainedSymbols();
   publishAllSymbols("false");
   logLine("[RESET] all symbols set to false");
@@ -204,17 +218,34 @@ void loop() {
   ensureMqtt();
   mqtt.loop();
 
-  // Drain pending edges captured by ISRs and publish each symbol's "true".
-  // No dedupe and no counting in the bridge — M3 owns that.
+  // Drain pending edges captured by ISRs. Each edge opens a confirm
+  // window; the pin must still be HIGH when it closes or the edge is
+  // dropped as noise. No dedupe and no counting — M3 owns that.
+  unsigned long nowMs = millis();
   for (int i = 0; i < NUM_PINS; i++) {
-    if (!pendingEdge[i]) continue;
-    noInterrupts();
-    pendingEdge[i] = false;
-    interrupts();
+    if (pendingEdge[i]) {
+      noInterrupts();
+      pendingEdge[i] = false;
+      interrupts();
 
-    mqtt.publish(SYMBOL_TOPICS[i], "true", false);
-    Serial.printf("[PIN %d HIGH] %s = true\n",
-                  HOUSE_PINS[i], SYMBOL_TOPICS[i]);
+      if (nowMs - bootMs < BOOT_EDGE_MASK_MS) {
+        Serial.printf("[PIN %d] edge ignored (boot mask)\n", HOUSE_PINS[i]);
+      } else if (edgeSeenMs[i] == 0) {
+        edgeSeenMs[i] = nowMs;
+      }
+    }
+
+    if (edgeSeenMs[i] != 0 && nowMs - edgeSeenMs[i] >= EDGE_CONFIRM_MS) {
+      edgeSeenMs[i] = 0;
+      if (digitalRead(HOUSE_PINS[i]) == HIGH) {
+        mqtt.publish(SYMBOL_TOPICS[i], "true", false);
+        Serial.printf("[PIN %d HIGH] %s = true\n",
+                      HOUSE_PINS[i], SYMBOL_TOPICS[i]);
+      } else {
+        Serial.printf("[PIN %d] edge dropped (glitch, low at confirm)\n",
+                      HOUSE_PINS[i]);
+      }
+    }
   }
 
   unsigned long now = millis();
