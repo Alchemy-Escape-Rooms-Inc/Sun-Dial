@@ -45,15 +45,15 @@
 
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include "MANIFEST.h"  // single source of truth for device identity/broker/heartbeat
 
-#define FW_VERSION "4.2.0"
+#define FW_VERSION FIRMWARE_VERSION
 
 const char* WIFI_SSID = "AlchemyGuest";
 const char* WIFI_PASS = "VoodooVacation5601";
 
-const char*    MQTT_HOST   = "10.1.10.115";
-const uint16_t MQTT_PORT   = 1883;
-const char*    DEVICE_NAME = "SunDial";
+const char*    MQTT_HOST   = BROKER_IP;
+const uint16_t MQTT_PORT   = BROKER_PORT;
 const char*    TOPIC_CMD   = "MermaidsTale/SunDial/command";
 const char*    TOPIC_STAT  = "MermaidsTale/SunDial/status";
 const char*    TOPIC_LOG   = "MermaidsTale/SunDial/log";
@@ -68,7 +68,7 @@ const char* const SYMBOL_TOPICS[NUM_PINS] = {
   "MermaidsTale/SunDial/Trident"
 };
 
-const unsigned long HEARTBEAT_INTERVAL_MS = 300000UL;  // 5 minutes
+const unsigned long HEARTBEAT_INTERVAL_MS = HEARTBEAT_MS;  // 5 minutes, from MANIFEST.h
 
 // Glitch rejection (added 4.2.0). Wire logs on 2026-07-09 show phantom
 // edges on several pins at once right at power-on (18:03:10: three
