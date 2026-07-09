@@ -273,3 +273,84 @@ GPIO15 ESP32-S3 research (corrects earlier note about strapping):
          If the previously-working pin now misses, GPIO15 is fine
          and the issue is upstream wiring. If GPIO15 still misses,
          the input is damaged.
+
+------------------------------------------------------------
+Session: 2026-05-07
+------------------------------------------------------------
+Task: pull latest SunDial_Bridge and flash.
+
+- git pull origin/main: already up to date.
+- Local main is 1 commit ahead of origin (dfd6396 "Add Serial debug
+  to trident block to diagnose missing-pin issue") — push to main was
+  blocked by sandbox safety; commit remains UNPUSHED. User must run
+  `git push origin main` manually if they want it on GitHub.
+- WatchTower MQTT audit: PASS (FW 3.2.0 in the .ino).
+- Compile: PASS, esp32:esp32:esp32s3, 66% flash / 14% RAM.
+- Flash attempt 1 on COM5: FAIL — "port busy / access denied".
+  No obvious holder process found; user unplugged/replugged the ESP.
+- After replug the board re-enumerated as COM4 (correctly identified
+  as ESP32 Family Device).
+- Flash on COM4: PASS (876 KB written, hash verified, hard reset).
+
+User reports: bridge keeps "resetting in the middle of the game" — and
+across sessions the missing pin has wandered (trident last session,
+bottle this session). Both data points point away from "specific GPIO
+broken" and toward "bridge logic is fragile."
+
+Decision: stop having the bridge own the round logic. Move counting,
+dedupe, and SOLVED detection to M3.
+
+SunDial_Bridge.ino rewrite (FW 4.0.0):
+  - Bridge is now stateless. On every rising edge it publishes
+    "true" (retained) to a per-symbol topic:
+        MermaidsTale/SunDial/Bottle
+        MermaidsTale/SunDial/Crab
+        MermaidsTale/SunDial/Turtle
+        MermaidsTale/SunDial/Coconut
+        MermaidsTale/SunDial/Trident
+  - At boot, on PUZZLE_RESET, and on RESET, all 5 symbol topics are
+    published as "false" (retained).
+  - Removed: counted[] dedupe, "Correct N/5" status, SOLVED
+    publish, sundialTotemOn/Off (TOPIC_TOTEM removed entirely),
+    wait-for-LOW re-arm.
+  - Kept: ISR-based reads on GPIO 4,5,6,7,15, INPUT_PULLDOWN,
+    heartbeat (5 min), PING/STATUS/RESET/PUZZLE_RESET/CLEAR_STATUS.
+  - M3 now owns: dedupe, counting, SOLVED, totem, round end. M3
+    publishes PUZZLE_RESET when it wants to clear bridge state.
+
+Compiled and flashed via arduino-cli, esp32:esp32:esp32s3, COM4.
+875 KB written, hash verified.
+
+Next step for user: wire M3 to subscribe to MermaidsTale/SunDial/+
+(or the five specific symbol topics) and own the round logic +
+totem trigger. The "resets in the middle of the game" complaint
+should disappear once the bridge is no longer making round-state
+decisions.
+
+------------------------------------------------------------
+Session: 2026-07-09
+------------------------------------------------------------
+Task: WatchTower protocol review of SunDial_Bridge, then fix + flash.
+
+- Protocol audit vs Alchemy-Grimoire mqtt-protocol.md: PASS except
+  PONG published on /status (spec: /command) and no MANIFEST.h.
+- Wire-log investigation (WatchTower mqtt_2026-07-09_141659.txt):
+  * Bridge bounced all day (ONLINE 16:09:47 + 16:10:05 + 17:42:52),
+    never up 5 min, so no heartbeat ever seen; all PINGs landed
+    while it was off the broker -> "no PONG" report explained.
+  * 17:43:29 all FIVE symbols true within ~100ms; 18:03:10 (after
+    power-cycle) Turtle/Coconut/Trident true 60ms after boot slate.
+    Power-on electrical noise, not guest input. Matches the prior
+    session's "wandering missing pin" — noise, not a specific GPIO.
+  * Retained phantom trues manually cleared off broker via paho.
+- FW 4.1.0 (1972c7a): symbol topics NON-retained; boot/RESET/
+  PUZZLE_RESET wipe retained residue (retained-empty) then "false".
+  Retained true replayed into M3 on reconnect and re-fired
+  Correct/Solved events. M3 Jungle Room Reset already publishes
+  false + PUZZLE_RESET, so retained state was never needed.
+- FW 4.1.1 (ba438b5): PONG now on /command per protocol.
+- FW 4.2.0 (a888cd1): glitch rejection — edges in first 3s of boot
+  discarded; other edges must still read HIGH 30ms later (real
+  pulses hold ~2s).
+- TODO: MANIFEST.h (manifest-protocol.md); chase level-shifter /
+  wiring noise at power-on if boot-mask serial lines confirm it.
