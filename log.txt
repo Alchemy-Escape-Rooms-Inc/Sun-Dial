@@ -354,3 +354,27 @@ Task: WatchTower protocol review of SunDial_Bridge, then fix + flash.
   pulses hold ~2s).
 - TODO: MANIFEST.h (manifest-protocol.md); chase level-shifter /
   wiring noise at power-on if boot-mask serial lines confirm it.
+
+------------------------------------------------------------
+Session: 2026-07-11
+------------------------------------------------------------
+Task: flash FW 4.2.0 (committed 07-09, never flashed until now).
+
+- WatchTower protocol audit: PASS 8/8.
+- Compile: PASS, esp32:esp32:esp32s3, 877 KB (66% flash / 14% RAM).
+- Board enumerated as COM22 this time (USB-Serial/JTAG mode,
+  MAC 98:a3:16:12:72:9c) - not COM4/COM5 as in prior sessions.
+  First two plug attempts showed nothing on the bus (cable/port).
+- Flash: PASS, hash verified, hard reset.
+- Live verify on broker (mqtt_2026-07-10_150953.txt):
+  * 13:44:23 ONLINE; boot wiped retained symbols then "false" (4.1.0 ok)
+  * 13:44:57 STATUS:RUNNING:UP35s:RSSI-58:VER4.2.0 (version confirmed)
+  * 13:45:25 PING -> PONG on /command (4.1.1 ok)
+  * No phantom symbol trues at boot (4.2.0 glitch mask ok)
+- Note: WatchTower log shows most messages duplicated (x2) -> two
+  logger/publisher instances suspected (see TridentCabinet PING
+  flood / old WatchTower v1 on CommandCenter).
+- Also seen 07-11 ~13:09: publishes to MermaidsTale/SunDial_Bridge/command,
+  a topic nothing subscribes to - find the publisher.
+- Next: reinstall board in room, confirm it stays on broker > 5 min
+  (heartbeat due at UP300s) given 07-09 bouncing history.
