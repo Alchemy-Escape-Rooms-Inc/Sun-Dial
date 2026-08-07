@@ -99,7 +99,7 @@ int inner_choice;
 int correct_outer_1 = 2;   //bottle
 int correct_inner_1 = 3;
 
-int correct_outer_2 = 5;   //crab
+int correct_outer_2 = 5;   //skull
 int correct_inner_2 = 4;
 
 int correct_outer_3 = 6;   // turtle
@@ -466,7 +466,7 @@ bool correct = 0;
                   delay (2000);
                   turn_bezel_off ();
                             
-                  pwmBoard [0].setPWM (7 , 0, 4080);  // first board, address 7, full power  (green) crab
+                  pwmBoard [0].setPWM (7 , 0, 4080);  // first board, address 7, full power  (green) skull
                   previous_condition_2 = 1;
                   correct = 1; 
                   digitalWrite (HOUSE_2, LOW);
