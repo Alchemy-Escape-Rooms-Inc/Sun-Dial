@@ -99,16 +99,16 @@ int inner_choice;
 int correct_outer_1 = 2;   //bottle
 int correct_inner_1 = 3;
 
-int correct_outer_2 = 3;   //seahorse
-int correct_inner_2 = 6;
+int correct_outer_2 = 5;   //crab
+int correct_inner_2 = 4;
 
-int correct_outer_3 = 6;   // coconut
+int correct_outer_3 = 6;   // turtle
 int correct_inner_3 = 7;
 
-int correct_outer_4 = 8;  //trident
+int correct_outer_4 = 8;  //coconut
 int correct_inner_4 = 9;
 
-int correct_outer_5 = 9;   //skull
+int correct_outer_5 = 9;   //trident
 int correct_inner_5 = 1;
 
 int correct_blink_delay = 250;
@@ -466,7 +466,7 @@ bool correct = 0;
                   delay (2000);
                   turn_bezel_off ();
                             
-                  pwmBoard [0].setPWM (7 , 0, 4080);  // first board, address 7, full power  (green) seahorse
+                  pwmBoard [0].setPWM (7 , 0, 4080);  // first board, address 7, full power  (green) crab
                   previous_condition_2 = 1;
                   correct = 1; 
                   digitalWrite (HOUSE_2, LOW);
@@ -483,7 +483,7 @@ bool correct = 0;
                       delay (2000);
                       turn_bezel_off ();    
                       
-                      pwmBoard [1].setPWM (1 , 0, 4080);              // second board adress 1 , full power  (green) coconut
+                      pwmBoard [1].setPWM (1 , 0, 4080);              // second board adress 1 , full power  (green) turtle
                       previous_condition_3 = 1;
                       correct = 1;
                       digitalWrite (HOUSE_3, LOW);
@@ -499,7 +499,7 @@ bool correct = 0;
                               delay (2000);
                               turn_bezel_off ();
                                                                         
-                              pwmBoard [1].setPWM (7 , 0, 4080);       // second board, address 7, full power  (green) trident
+                              pwmBoard [1].setPWM (7 , 0, 4080);       // second board, address 7, full power  (green) coconut
                               previous_condition_4 = 1;
                               correct = 1;
                               digitalWrite (HOUSE_4, LOW);
@@ -517,7 +517,7 @@ bool correct = 0;
 
                                   turn_bezel_off ();
 
-                                  pwmBoard [1].setPWM (10 , 0, 4080);     // second board, address 10 full power  (green)  skull
+                                  pwmBoard [1].setPWM (10 , 0, 4080);     // second board, address 10 full power  (green)  trident
                                   previous_condition_5 = 1;
                                   correct = 1;
                                   digitalWrite (HOUSE_5, LOW);
