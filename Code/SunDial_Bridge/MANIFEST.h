@@ -7,7 +7,7 @@
 // ============================================================
 
 #define DEVICE_NAME           "SunDial"
-#define FIRMWARE_VERSION      "4.2.0"
+#define FIRMWARE_VERSION      "4.3.0"
 #define BOARD_TYPE            "ESP32-S3"
 #define ROOM                  "MermaidsTale"
 #define DESCRIPTION           "Stateless MQTT bridge for the SunDial puzzle: captures 5 pulse inputs from the Sand Dial Arduino via ISRs and publishes per-symbol true events; M3 owns dedupe, counting, SOLVED, and the totem trigger"
@@ -19,7 +19,7 @@
 // MQTT
 #define BROKER_IP             "10.1.10.115"
 #define BROKER_PORT           1883
-#define HEARTBEAT_MS          300000
+#define HEARTBEAT_MS          5000
 
 #define SUBSCRIBE_TOPICS      "MermaidsTale/SunDial/command"
 #define PUBLISH_TOPICS        "MermaidsTale/SunDial/status, MermaidsTale/SunDial/log, MermaidsTale/SunDial/Bottle, MermaidsTale/SunDial/Crab, MermaidsTale/SunDial/Turtle, MermaidsTale/SunDial/Coconut, MermaidsTale/SunDial/Trident"
@@ -28,6 +28,6 @@
 // Hardware
 #define PIN_CONFIG            "HOUSE_1/Bottle=4, HOUSE_2/Crab=5, HOUSE_3/Turtle=6, HOUSE_4/Coconut=7, HOUSE_5/Trident=15"
 #define COMPONENTS            "Level shifter on Sand Dial Arduino HOUSE_1..5 outputs (2s HIGH pulse per correct symbol)"
-#define KNOWN_QUIRKS          "Power-on electrical noise fires phantom rising edges on symbol inputs (2026-07-09: 3-5 pins within 100ms of boot); FW 4.2.0 discards edges in the first 3s and requires the pin still HIGH 30ms after an edge. Symbol topics are deliberately NOT retained (retained true replayed into M3 on reconnect and re-fired Correct/Solved events); boot/RESET/PUZZLE_RESET wipe retained residue. PONG is answered on /command. Serial prints go to UART0, not native USB CDC, so a USB serial monitor shows nothing."
+#define KNOWN_QUIRKS          "Power-on electrical noise fires phantom rising edges on symbol inputs (2026-07-09: 3-5 pins within 100ms of boot); FW 4.2.0 discards edges in the first 3s and requires the pin still HIGH 30ms after an edge. Board hung silently ~2-5min after MQTT connect 3x on 2026-07-15/16 (root cause unknown, suspect Arduino-side electrical noise); FW 4.3.0 adds 30s task watchdog, 2min offline self-reboot, LWT (retained OFFLINE on /status), and 5s heartbeat so a hang self-recovers and is visible. Symbol topics are deliberately NOT retained (retained true replayed into M3 on reconnect and re-fired Correct/Solved events); boot/RESET/PUZZLE_RESET wipe retained residue. PONG is answered on /command. Serial prints go to UART0, not native USB CDC, so a USB serial monitor shows nothing. FLASH VIA NATIVE USB CONNECTOR ONLY (enumerates as Espressif VID_303A, no BOOT-hold needed): the CP210x/UART0 connector has corrupt data lines (2026-07-16, every esptool sync failed with garbage; DTR/RTS reset still works through it)."
 
 #define REPO_URL              "https://github.com/Alchemy-Escape-Rooms-Inc/Sun-Dial"

@@ -41,10 +41,20 @@
 //  MQTT topics (subscribe; PONG is answered back on this topic):
 //    MermaidsTale/SunDial/command   PING | STATUS | RESET |
 //                                    PUZZLE_RESET | CLEAR_STATUS
+//
+//  4.3.0 — hang recovery (board hung silently ~2-5min after connect
+//  3x on 2026-07-15/16; root cause unknown, puzzle logic unchanged):
+//    - 30s task watchdog reboots the chip if loop() ever stalls.
+//    - 2min offline self-reboot catches wedges where loop() still
+//      runs but WiFi/MQTT never recovers.
+//    - LWT: broker publishes retained OFFLINE to /status when the
+//      connection dies, so WatchTower sees the death without a PING.
+//    - Heartbeat 5min -> 5s (MANIFEST.h) to match the fleet.
 // ============================================================
 
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <esp_task_wdt.h>
 #include "MANIFEST.h"  // single source of truth for device identity/broker/heartbeat
 
 #define FW_VERSION FIRMWARE_VERSION
@@ -68,7 +78,14 @@ const char* const SYMBOL_TOPICS[NUM_PINS] = {
   "MermaidsTale/SunDial/Trident"
 };
 
-const unsigned long HEARTBEAT_INTERVAL_MS = HEARTBEAT_MS;  // 5 minutes, from MANIFEST.h
+const unsigned long HEARTBEAT_INTERVAL_MS = HEARTBEAT_MS;  // 5 seconds, from MANIFEST.h
+
+// Hang recovery (4.3.0). The watchdog timeout must exceed the worst
+// blocking path in loop(): ensureWiFi's 10s wait (fed inside) plus a
+// blocking mqtt.connect() attempt.
+const uint32_t      WDT_TIMEOUT_S     = 30;
+const unsigned long MQTT_RETRY_MS     = 3000;    // min gap between connect attempts
+const unsigned long OFFLINE_REBOOT_MS = 120000;  // no broker for 2min -> restart
 
 // Glitch rejection (added 4.2.0). Wire logs on 2026-07-09 show phantom
 // edges on several pins at once right at power-on (18:03:10: three
@@ -88,6 +105,8 @@ unsigned long edgeSeenMs[NUM_PINS] = { 0, 0, 0, 0, 0 };
 
 unsigned long bootMs = 0;
 unsigned long lastHeartbeatMs = 0;
+unsigned long lastMqttOkMs = 0;      // last time the broker connection was up
+unsigned long lastMqttAttemptMs = 0; // last connect attempt (retry backoff)
 
 WiFiClient   wifiClient;
 PubSubClient mqtt(wifiClient);
@@ -182,15 +201,22 @@ void ensureWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(200);
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) {
+    esp_task_wdt_reset();
+    delay(200);
+  }
 }
 
 void ensureMqtt() {
   if (mqtt.connected()) return;
+  if (millis() - lastMqttAttemptMs < MQTT_RETRY_MS) return;
+  lastMqttAttemptMs = millis();
   String clientId = String(DEVICE_NAME) + "-" + String(random(0xffff), HEX);
-  if (mqtt.connect(clientId.c_str())) {
+  // LWT: broker publishes retained OFFLINE to /status if this
+  // connection dies (keepalive timeout ~22s after a silent hang).
+  if (mqtt.connect(clientId.c_str(), TOPIC_STAT, 0, true, "OFFLINE")) {
     mqtt.subscribe(TOPIC_CMD);
-    mqtt.publish(TOPIC_STAT, "ONLINE");
+    mqtt.publish(TOPIC_STAT, "ONLINE", true);  // retained: overwrite stale OFFLINE
     Serial.println("[MQTT] ONLINE published");
   }
 }
@@ -198,6 +224,19 @@ void ensureMqtt() {
 void setup() {
   Serial.begin(115200);
   bootMs = millis();
+
+  // Task watchdog on the loop task: if loop() ever stalls (blocked
+  // call, interrupt storm), the chip panics and reboots itself.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  esp_task_wdt_config_t wdtCfg = {};
+  wdtCfg.timeout_ms = WDT_TIMEOUT_S * 1000;
+  wdtCfg.idle_core_mask = 0;
+  wdtCfg.trigger_panic = true;
+  esp_task_wdt_reconfigure(&wdtCfg);  // core 3.x inits the WDT itself
+#else
+  esp_task_wdt_init(WDT_TIMEOUT_S, true);
+#endif
+  esp_task_wdt_add(NULL);
   for (int i = 0; i < NUM_PINS; i++) {
     pinMode(HOUSE_PINS[i], INPUT_PULLDOWN);
     attachInterrupt(digitalPinToInterrupt(HOUSE_PINS[i]), ISRS[i], RISING);
@@ -210,13 +249,25 @@ void setup() {
   // also clears anything left on the broker by older firmware.
   wipeRetainedSymbols();
   publishAllSymbols("false");
+  lastMqttOkMs = millis();
   Serial.printf("SunDial Bridge ready (FW %s)\n", FW_VERSION);
 }
 
 void loop() {
+  esp_task_wdt_reset();
   ensureWiFi();
   ensureMqtt();
   mqtt.loop();
+
+  // Offline self-reboot: loop() can be alive while the WiFi/MQTT
+  // stack is wedged (the watchdog can't see that). If the broker has
+  // been unreachable for OFFLINE_REBOOT_MS, restart and start clean.
+  if (mqtt.connected()) {
+    lastMqttOkMs = millis();
+  } else if (millis() - lastMqttOkMs >= OFFLINE_REBOOT_MS) {
+    Serial.println("[WDT] no broker for 2min — restarting");
+    ESP.restart();
+  }
 
   // Drain pending edges captured by ISRs. Each edge opens a confirm
   // window; the pin must still be HIGH when it closes or the edge is
