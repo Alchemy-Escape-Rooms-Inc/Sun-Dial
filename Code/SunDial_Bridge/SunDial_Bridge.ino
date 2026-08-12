@@ -3,8 +3,10 @@
 //  ESP32-S3
 //
 //  Logic:
-//    - Watch 5 input pins from the SunDial Arduino. Each pin is
-//      pulsed HIGH for ~2s when its symbol is correctly chosen.
+//    - Watch 6 input pins from the SunDial Arduino. HOUSE_1..5 are
+//      each pulsed HIGH for ~2s when their symbol is correctly
+//      chosen; HOUSE_6 is pulsed HIGH for ~3s on a WRONG guess
+//      (the controller's red-bezel branch drives it).
 //    - Pin events are captured in hardware ISRs (rising edge) so
 //      MQTT/WiFi work in loop() can never block long enough to
 //      miss a pulse.
@@ -17,7 +19,7 @@
 //      to all 5 symbol topics so M3 sees a clean slate.
 //
 //  Wiring:
-//    Arduino HOUSE_1..5 -> level shifter -> ESP32 GPIO 4,5,6,7,15
+//    Arduino HOUSE_1..6 -> level shifter -> ESP32 GPIO 4,5,6,7,15,16
 //    Arduino GND        -> ESP32 GND
 //
 //  Symbol mapping (HOUSE_n -> ESP32 GPIO -> Symbol):
@@ -26,6 +28,7 @@
 //    HOUSE_3 -> GPIO 6  -> Turtle
 //    HOUSE_4 -> GPIO 7  -> Coconut
 //    HOUSE_5 -> GPIO 15 -> Trident
+//    HOUSE_6 -> GPIO 16 -> Wrong   (wrong-guess pulse, 4.4.0)
 //
 //  MQTT topics (publish, not retained):
 //    MermaidsTale/SunDial/Bottle    "true" | "false"
@@ -33,6 +36,7 @@
 //    MermaidsTale/SunDial/Turtle    "true" | "false"
 //    MermaidsTale/SunDial/Coconut   "true" | "false"
 //    MermaidsTale/SunDial/Trident   "true" | "false"
+//    MermaidsTale/SunDial/Wrong     "true" | "false"
 //
 //  MQTT topics (publish, not retained):
 //    MermaidsTale/SunDial/status    ONLINE, HEARTBEAT, STATUS, OK
@@ -50,6 +54,15 @@
 //    - LWT: broker publishes retained OFFLINE to /status when the
 //      connection dies, so WatchTower sees the death without a PING.
 //    - Heartbeat 5min -> 5s (MANIFEST.h) to match the fleet.
+//
+//  4.4.0 — wrong-guess reporting: the controller Arduino has always
+//  pulsed HOUSE_6 HIGH (~3s, the red-bezel branch) on an incorrect
+//  choose-button press, but the bridge never watched it. A 6th input
+//  (GPIO 16) now publishes MermaidsTale/SunDial/Wrong "true" per
+//  wrong guess so the AI character can tell players the combination
+//  was incorrect. Same ISR + confirm-window path as the symbols;
+//  reset/boot publish "false" on it like the rest. Requires wiring
+//  Arduino HOUSE_6 (D7) through the level shifter to GPIO 16.
 // ============================================================
 
 #include <WiFi.h>
@@ -68,14 +81,15 @@ const char*    TOPIC_CMD   = "MermaidsTale/SunDial/command";
 const char*    TOPIC_STAT  = "MermaidsTale/SunDial/status";
 const char*    TOPIC_LOG   = "MermaidsTale/SunDial/log";
 
-const int NUM_PINS = 5;
-const int HOUSE_PINS[NUM_PINS] = { 4, 5, 6, 7, 15 };
+const int NUM_PINS = 6;
+const int HOUSE_PINS[NUM_PINS] = { 4, 5, 6, 7, 15, 16 };
 const char* const SYMBOL_TOPICS[NUM_PINS] = {
   "MermaidsTale/SunDial/Bottle",
   "MermaidsTale/SunDial/Crab",
   "MermaidsTale/SunDial/Turtle",
   "MermaidsTale/SunDial/Coconut",
-  "MermaidsTale/SunDial/Trident"
+  "MermaidsTale/SunDial/Trident",
+  "MermaidsTale/SunDial/Wrong"   // HOUSE_6: wrong-guess pulse (4.4.0)
 };
 
 const unsigned long HEARTBEAT_INTERVAL_MS = HEARTBEAT_MS;  // 5 seconds, from MANIFEST.h
@@ -98,10 +112,10 @@ const unsigned long BOOT_EDGE_MASK_MS = 3000;
 const unsigned long EDGE_CONFIRM_MS   = 30;
 
 // Set HIGH by the ISR on a rising edge. Cleared by loop() once consumed.
-volatile bool pendingEdge[NUM_PINS] = { false, false, false, false, false };
+volatile bool pendingEdge[NUM_PINS] = { false, false, false, false, false, false };
 
 // millis() when a drained edge started its confirm window; 0 = none.
-unsigned long edgeSeenMs[NUM_PINS] = { 0, 0, 0, 0, 0 };
+unsigned long edgeSeenMs[NUM_PINS] = { 0, 0, 0, 0, 0, 0 };
 
 unsigned long bootMs = 0;
 unsigned long lastHeartbeatMs = 0;
@@ -117,7 +131,8 @@ void IRAM_ATTR isrPin1() { pendingEdge[1] = true; }
 void IRAM_ATTR isrPin2() { pendingEdge[2] = true; }
 void IRAM_ATTR isrPin3() { pendingEdge[3] = true; }
 void IRAM_ATTR isrPin4() { pendingEdge[4] = true; }
-void (*const ISRS[NUM_PINS])() = { isrPin0, isrPin1, isrPin2, isrPin3, isrPin4 };
+void IRAM_ATTR isrPin5() { pendingEdge[5] = true; }
+void (*const ISRS[NUM_PINS])() = { isrPin0, isrPin1, isrPin2, isrPin3, isrPin4, isrPin5 };
 
 void logLine(const char* msg) {
   Serial.println(msg);
