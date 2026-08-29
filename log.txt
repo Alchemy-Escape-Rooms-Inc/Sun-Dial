@@ -378,3 +378,26 @@ Task: flash FW 4.2.0 (committed 07-09, never flashed until now).
   a topic nothing subscribes to - find the publisher.
 - Next: reinstall board in room, confirm it stays on broker > 5 min
   (heartbeat due at UP300s) given 07-09 bouncing history.
+
+----------------------------------------------------------------
+Session start: 2026-08-29
+
+Task: flash the SunDial controller Nano with Sand_dial_new_boards_FINAL.ino.
+
+Done:
+  - Created sketch folder Code/Sand_dial_new_boards_FINAL/ (arduino-cli
+    needs folder name == .ino name; Code/ root holds unrelated .ino files).
+  - Compiled OK: arduino:avr:nano:cpu=atmega328old
+    (11098 B flash / 712 B RAM). Build in Code/Sand_dial_new_boards_FINAL/build.
+
+BLOCKED:
+  - Nano never enumerated on the PC across 3 scans (no COM port, no
+    unknown/driverless device, no CH340/FTDI/CP210x/Arduino VID). Only
+    COM1 + Bluetooth COM14-17 present. Likely charge-only cable, bad
+    port, or dead USB-serial chip on the Nano.
+
+Next:
+  - Swap cable/port; once a COMx appears:
+    arduino-cli upload -p COMx --fqbn arduino:avr:nano:cpu=atmega328old
+      --input-dir Code/Sand_dial_new_boards_FINAL/build
+    (if upload fails with "not in sync", retry with cpu=atmega328 = new bootloader)
