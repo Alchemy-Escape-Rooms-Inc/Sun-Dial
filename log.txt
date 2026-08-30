@@ -401,3 +401,10 @@ Next:
     arduino-cli upload -p COMx --fqbn arduino:avr:nano:cpu=atmega328old
       --input-dir Code/Sand_dial_new_boards_FINAL/build
     (if upload fails with "not in sync", retry with cpu=atmega328 = new bootloader)
+
+2026-08-29 (later): Nano appeared as CH340 on COM12 after cable/port swap.
+  Upload with cpu=atmega328old FAILED (not in sync, resp=0x00 x10).
+  Upload with cpu=atmega328 (NEW bootloader, 115200) SUCCEEDED.
+  -> This Nano uses the new bootloader; use arduino:avr:nano:cpu=atmega328.
+  Sand_dial_new_boards_FINAL.ino (HEAD 2625c9c content) now on the controller.
+  Live verify of dial/LED behavior pending.
