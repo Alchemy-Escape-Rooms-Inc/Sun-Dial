@@ -362,6 +362,7 @@ void setup() {
   esp_task_wdt_add(NULL);
   pinMode(TRIGGER_OUT_PIN, OUTPUT);
   digitalWrite(TRIGGER_OUT_PIN, LOW);
+  pinMode(NANO_RX_PIN, INPUT_PULLUP);                  // idle-high so an unwired RX reads silence, not noise
   Serial1.begin(115200, SERIAL_8N1, NANO_RX_PIN, -1);  // 4.5.0: RX only from the Nano
   for (int i = 0; i < NUM_PINS; i++) {
     pinMode(HOUSE_PINS[i], INPUT_PULLDOWN);
