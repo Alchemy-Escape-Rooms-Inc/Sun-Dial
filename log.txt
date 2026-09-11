@@ -408,3 +408,51 @@ Next:
   -> This Nano uses the new bootloader; use arduino:avr:nano:cpu=atmega328.
   Sand_dial_new_boards_FINAL.ino (HEAD 2625c9c content) now on the controller.
   Live verify of dial/LED behavior pending.
+
+----------------------------------------------------------------
+Session start: 2026-09-11
+
+Task 1: find the controller Nano on USB.
+  - NOT enumerating. 4 checks (2 cables, rear PC port, power LED ON): zero new
+    USB devices, no PnP events. Windows earlier showed "Unknown USB Device
+    (Device Descriptor Request Failed)" = handshake failure, not a driver.
+    Same symptom as 08-29 (fixed then by cable/port swap -> CH340 COM12).
+    Suspect the CH340 chip on the Nano. Awaiting user test of cable+port with
+    another device. Flash still uses cpu=atmega328 (NEW bootloader).
+
+Task 2: GUIDED MODE (user request). Controller Nano sketch v2:
+  - Outer wheel is driven by the Nano (OUTER_CONTROL D9) and parks on the
+    current step's symbol; players only dial the inner ring + CHOOSE.
+  - Steps in order: bottle 2/3, skull 5/4, turtle 6/7, coconut 8/9, trident 9/1
+    (user confirmed the code combos match the painted wheel).
+  - Correct: green bezel, symbol LED, HOUSE_n 2s pulse (unchanged for M3),
+    then outer spins to the next symbol. Wrong: red + HOUSE_6, stays put.
+  - Outer rotate button: user will DISCONNECT it (self-corrects anyway).
+  - TRIGGER in on A6 (ESP32 GPIO17 -> A6, 10k pulldown to GND). 100ms HIGH =
+    restart at step 1. TRIGGER_ENABLED 0 if the wire is not fitted.
+  - After homing, counters are set to 1 (home tooth = position 1 by the
+    sketch's own rule). Removed the loop() recursion after the 5th solve.
+  - GUIDED_MODE 0 restores the original free-order puzzle.
+  - Compiled: 12074 B flash / 998 B RAM. build_guided/. FLASH PENDING (no USB).
+
+Task 3: ring counts on MQTT (user request, no working data cable).
+  Bridge 4.5.0:
+  - Serial1 RX GPIO18 <- Nano D1 TX via 2k2/3k3 divider. Parses the Nano's
+    "outer counter = N" / "inner counter = N" -> MermaidsTale/SunDial/Outer
+    and /Inner (not retained). Other Nano lines -> /nano (dedupe, ~20/s cap).
+    STATUS reply now ends :OUTER<n>:INNER<n>.
+  - Subscribes MermaidsTale/GameStart; any payload -> 500ms pulse on GPIO17.
+    PUZZLE_RESET also pulses. GameStart within 3s of subscribing is ignored
+    (retained replay guard - a bridge reboot mid-game must not reset the dial).
+  - Compiled esp32:esp32:esp32s3, 919 KB (70%). build_450/. FLASH PENDING
+    (native USB connector, VID_303A).
+
+Wiring to add (both boards already share GND):
+  1. ESP32 GPIO17 -> Nano A6, plus 10k from A6 to GND.
+  2. Nano D1 (TX) -> 2k2 -> GPIO18, and 3k3 from GPIO18 to GND.
+  3. Unplug the outer rotate button from the motor Nano (D5).
+
+Next: get the Nano on a COM port (or a replacement Nano), flash build_guided
+  with cpu=atmega328; flash bridge 4.5.0; wire; bench: watch
+  MermaidsTale/SunDial/Outer,/Inner,/nano while turning the inner ring; publish
+  MermaidsTale/GameStart=Trigger and confirm the dial re-homes and parks on 2.
