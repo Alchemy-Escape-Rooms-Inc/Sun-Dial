@@ -456,3 +456,5 @@ Next: get the Nano on a COM port (or a replacement Nano), flash build_guided
   with cpu=atmega328; flash bridge 4.5.0; wire; bench: watch
   MermaidsTale/SunDial/Outer,/Inner,/nano while turning the inner ring; publish
   MermaidsTale/GameStart=Trigger and confirm the dial re-homes and parks on 2.
+[2026-09-11 16:59] Bridge 4.5.0 FLASHED via COM20 (CH343 UART connector worked with esptool today). STATUS reply VER4.5.0:OUTER-1:INNER-1. PUZZLE_RESET pulse test: see home log. Nano v2 still unflashed.
+[2026-09-11 18:01] Controller Nano v2 (guided mode) FLASHED on COM3 (CH340, new bootloader cpu=atmega328), 12074 B written, boot serial OK. Install + wiring + room bench pending.
