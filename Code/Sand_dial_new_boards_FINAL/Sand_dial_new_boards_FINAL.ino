@@ -144,7 +144,7 @@ int O_c = 0;
 
 // ---------------- GUIDED MODE ----------------
 #define GUIDED_MODE 1
-#define TRIGGER_ENABLED 1              // 0 if the ESP32->A6 wire is NOT installed (a floating A6 could fake a pulse)
+#define TRIGGER_ENABLED 0              // OFF: the select button is the start, as always. Set 1 only if ESP32 GPIO17 -> A6 (+10k pulldown) is wired.
 #define TRIGGER_PIN A6                 // analog-only pin: read with analogRead, needs external 10k pulldown
 const int TRIGGER_THRESHOLD = 400;     // 3.3V from the ESP32 reads ~675 of 1023
 const int NUM_STEPS = 5;
