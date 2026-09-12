@@ -459,3 +459,8 @@ Next: get the Nano on a COM port (or a replacement Nano), flash build_guided
 [2026-09-11 16:59] Bridge 4.5.0 FLASHED via COM20 (CH343 UART connector worked with esptool today). STATUS reply VER4.5.0:OUTER-1:INNER-1. PUZZLE_RESET pulse test: see home log. Nano v2 still unflashed.
 [2026-09-11 18:01] Controller Nano v2 (guided mode) FLASHED on COM3 (CH340, new bootloader cpu=atmega328), 12074 B written, boot serial OK. Install + wiring + room bench pending.
 [2026-09-11 18:04] User: select button has always been the start. TRIGGER_ENABLED set 0 (A6 unused), recompiled 11860 B, REFLASHED COM3 OK. Wire 1 (GPIO17->A6) DROPPED. Only wire 2 (Nano D1 -> divider -> GPIO18) needed for ring counts. Bridge still pulses GPIO17 on GameStart/PUZZLE_RESET - harmless, unconnected.
+
+Session 2026-09-12
+[2026-09-12 15:52] User installed the new Nano + bridge in the prop: sundial "keeps spinning, not counting the tabs". Serial wire NOT connected (no /nano,/Outer,/Inner traffic in wire log; bridge ONLINE 15:34, guard ignored a RETAINED GameStart on the broker).
+[2026-09-12 15:52] Root cause (code): v2.0 guided driver ran the outer wheel flat out between teeth and only sampled the beam every 35 ms; the original code stopped ON every tooth (beam HIGH -> control LOW) so counting happened while stopped. Fast teeth were missed -> count never hit target -> spun forever.
+[2026-09-12 15:52] FIX v2.1: outer driver is a stop-on-every-tooth state machine (DRIVE -> tooth edge -> stop, count, 250 ms DWELL -> LEAVE until beam clears -> DRIVE), counts on every loop pass, PARKED when count == target; nudged-off re-parks; select retries after the 90 s safety stop. Compiled 12048 B. REFLASH PENDING (Nano in the prop, not on USB).

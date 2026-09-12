@@ -13,6 +13,13 @@
   //    PUZZLE_RESET). Without the wire the dial still parks on step 1 at
   //    power-up and after the 5th solve.
   //
+  //    v2.1 (2026-09-12): the outer wheel now STOPS ON EVERY TOOTH while
+  //    travelling (250 ms dwell) exactly like the original snap-to-tooth
+  //    behaviour, and the guided driver counts the teeth itself on every
+  //    loop pass. v2.0 let the wheel run flat out between teeth and only
+  //    sampled the beam every 35 ms, so fast teeth were missed, the count
+  //    never reached the target and the wheel spun forever.
+  //
   //    SERIAL -> MQTT: Nano D1 (TX) -> divider (2k2 top / 3k3 bottom) -> ESP32
   //    GPIO 18. The bridge parses "outer counter = N" / "inner counter = N" and
   //    publishes MermaidsTale/SunDial/Outer and /Inner. Set GUIDED_MODE 0
@@ -164,6 +171,16 @@ unsigned long park_started_ms = 0;
 bool park_timed_out = 0;
 bool was_parked = 0;
 
+// outer-wheel driver state (guided mode)
+#define OD_DRIVE  0   // spinning, waiting for the next tooth to break the beam
+#define OD_DWELL  1   // stopped on a tooth, counted it, short pause
+#define OD_LEAVE  2   // spinning off the tooth until the beam clears
+#define OD_PARKED 3   // sitting on the target tooth
+int outer_drive_state = OD_DRIVE;
+bool outer_beam_prev = 0;
+unsigned long outer_dwell_start = 0;
+const unsigned long OUTER_DWELL_MS = 250;
+
 void setup() {
 
 
@@ -254,9 +271,9 @@ void loop() {
 check_buttons ();
 
 
-if (millis () - outer_loop_timer > 35){                // this timer code is required so excessive counts are not registered, once a count is registered
+if (!GUIDED_MODE && millis () - outer_loop_timer > 35){   // this timer code is required so excessive counts are not registered, once a count is registered
        count_outer_ticks ();                           // the count function can not be reentered until the timer reaches its value.
-       outer_loop_timer = millis ();}
+       outer_loop_timer = millis ();}                  // (guided mode: drive_outer_to_target() counts the outer teeth itself)
 
 
 if (millis () - inner_loop_timer > 105){
@@ -821,7 +838,17 @@ int guided_target (){
 
 // Parked = counter says we're on the target AND the beam is broken (sitting on a tooth).
 bool outer_parked (){
-  return (outer_counter == guided_target ()) && (digitalRead (IR_OUTER_COUNTER) == HIGH);
+  return outer_drive_state == OD_PARKED;
+}
+
+// Called whenever the target changes or the counters were just re-synced.
+void outer_drive_rearm (){
+  outer_beam_prev = (digitalRead (IR_OUTER_COUNTER) == HIGH);
+  if (outer_counter == guided_target () && outer_beam_prev) outer_drive_state = OD_PARKED;
+  else outer_drive_state = OD_DRIVE;
+  park_started_ms = millis ();
+  park_timed_out = 0;
+  was_parked = 0;
 }
 
 void announce_step (){
@@ -833,10 +860,8 @@ void announce_step (){
 
 void guided_begin (){
   current_step = 0;
-  park_started_ms = millis ();
-  park_timed_out = 0;
-  was_parked = 0;
   Serial.println ("guided begin");
+  outer_drive_rearm ();
   announce_step ();
 }
 
@@ -861,30 +886,72 @@ void guided_restart (){
 // Non-blocking: called every loop pass. Spins the outer wheel until it sits on
 // the target tooth, then holds it there. If it gets nudged off, it goes around
 // again (the zero mark re-syncs the count every lap).
+// Non-blocking, called every loop pass. Moves the outer wheel ONE TOOTH AT A
+// TIME (stop on the tooth, count it, pause, move off) until it sits on the
+// target tooth. Same stop-on-every-tooth rhythm the original code had, so the
+// beam is never missed at speed. If the wheel gets knocked off the target it
+// goes around again (the zero mark re-syncs the count every lap).
 void drive_outer_to_target (){
   if (park_timed_out) { digitalWrite (OUTER_CONTROL, LOW); return; }
-  if (outer_parked ()) {
-    digitalWrite (OUTER_CONTROL, LOW);
-    if (!was_parked) {
-      was_parked = 1;
-      Serial.print ("parked outer="); Serial.println (outer_counter);
-    }
-    return;
+  bool beam = (digitalRead (IR_OUTER_COUNTER) == HIGH);   // HIGH = tooth in the beam
+
+  switch (outer_drive_state) {
+
+    case OD_DRIVE:
+      digitalWrite (OUTER_CONTROL, HIGH);
+      if (beam && !outer_beam_prev) {                     // a tooth just arrived
+        digitalWrite (OUTER_CONTROL, LOW);
+        outer_counter = outer_counter + 1;
+        if (digitalRead (IR_OUTER_0) == HIGH) outer_counter = 1;   // zero mark = position 1
+        Serial.print ("outer counter = "); Serial.println (outer_counter);
+        outer_dwell_start = millis ();
+        outer_drive_state = OD_DWELL;
+      } else if (millis () - park_started_ms > PARK_TIMEOUT_MS) {
+        park_timed_out = 1;
+        digitalWrite (OUTER_CONTROL, LOW);
+        Serial.println ("ERROR outer wheel never reached target - motor stopped (select to retry)");
+      }
+      break;
+
+    case OD_DWELL:
+      digitalWrite (OUTER_CONTROL, LOW);
+      if (outer_counter == guided_target ()) {
+        outer_drive_state = OD_PARKED;
+        was_parked = 1;
+        Serial.print ("parked outer="); Serial.println (outer_counter);
+      } else if (millis () - outer_dwell_start >= OUTER_DWELL_MS) {
+        outer_drive_state = OD_LEAVE;
+      }
+      break;
+
+    case OD_LEAVE:
+      digitalWrite (OUTER_CONTROL, HIGH);
+      if (!beam) outer_drive_state = OD_DRIVE;            // cleared the tooth, look for the next one
+      break;
+
+    case OD_PARKED:
+      digitalWrite (OUTER_CONTROL, LOW);
+      if (!beam) {                                        // knocked off the tooth: go around again
+        Serial.println ("outer nudged off target - re-parking");
+        park_started_ms = millis ();
+        was_parked = 0;
+        outer_drive_state = OD_DRIVE;
+      }
+      break;
   }
-  if (was_parked) { was_parked = 0; park_started_ms = millis (); }
-  if (millis () - park_started_ms > PARK_TIMEOUT_MS) {
-    park_timed_out = 1;
-    digitalWrite (OUTER_CONTROL, LOW);
-    Serial.println ("ERROR outer wheel never reached target - motor stopped (trigger to retry)");
-    return;
-  }
-  digitalWrite (OUTER_CONTROL, HIGH);
+  outer_beam_prev = beam;
 }
 
 // CHOOSE handling for guided mode: only the current step's combo counts.
 void guided_choose (){
   if (choose_state != 0) return;                       // not pressed
   if (current_step >= NUM_STEPS) return;               // finished, waiting for restart
+  if (park_timed_out) {                                // motor was stopped by the safety timeout: select retries
+    Serial.println ("select -> retry outer travel");
+    outer_drive_rearm ();
+    delay (500);
+    return;
+  }
   if (!outer_parked ()) {                              // wheel still travelling - ignore the press
     Serial.println ("choose ignored (outer moving)");
     delay (300);
@@ -912,9 +979,7 @@ void guided_choose (){
     turn_bezel_white ();
     turn_former_greens_on ();
     current_step++;
-    park_started_ms = millis ();
-    park_timed_out = 0;
-    was_parked = 0;
+    outer_drive_rearm ();
     announce_step ();
     if (current_step >= NUM_STEPS) { finish_sequence (); }
     else { delay (1000); }                             // let go of CHOOSE before the wheel moves
