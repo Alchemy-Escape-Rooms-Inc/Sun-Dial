@@ -468,3 +468,13 @@ Session 2026-09-12
 [2026-09-12 16:47] PROBE sketch flashed to 2nd new Nano on COM3 (8108 B; first attempt not-in-sync then port dropped, retry OK with cpu=atmega328). Nano A (v2.1) still in prop. Next: user swaps probe Nano into the prop socket and reads LED/bezel/wheels.
 [2026-09-12 17:08] PROBE RESULT in prop with Nano B: rings still, bezel white, sensor LED flickers -> socket/power/I2C/sensors/stop-lines ALL GOOD. Nano A = faulty (spare). v2.1 guided FLASHED onto Nano B on COM3 (12048 B). Next: install Nano B, home -> light show -> select -> park on bottle.
 [2026-09-12 17:13] Nano B in prop, v2.1: homing OK, light show OK, parks on BOTTLE OK, outer self-corrects after left button. INNER ring: one stop per lap at position 1 -> inner counter/zero sensors swapped in code. Swapped IR_INNER_COUNTER=A0 / IR_INNER_0=A1, compiled. Reflash pending.
+[2026-09-12 17:14] Inner-swap build flashed to Nano B on COM3.
+[2026-09-12 17:38] 'try that one': a CH340 Nano on COM3 flashed with the inner-swap build (12048 B, cpu=atmega328). Unknown which board (A=suspect, B=proven).
+[2026-09-12 18:03] PROBE v2 (bezel readout: LED1 red=A0, LED2 green=A1, LED3 blue=A2, LED4 white=A3) flashed to the good Nano on COM3 (8280 B). Third board today lost USB after a prop trip (power LED on) - advised metering the socket 5V/VIN before any new board goes in. Awaiting in-prop colour readout for inner/outer buttons.
+[2026-09-12 18:08] PROBE v2 in prop: bezel winked 4 colours (I2C + colour map OK). INNER ring spins with NO button (D8 stop line not reaching motor board) AND inner sensors show NO colour (A0/A1 see nothing). Outer side not reported. An hour earlier the same board held both rings still + inner saw the home mark => something on the INNER side of the perf board came loose (user suspects their solder joints). Session ended: user exhausted.
+STATE FOR NEXT SESSION:
+  - Bridge 4.5.0 LIVE in prop (PING/PONG OK, GameStart guard OK). Serial wire NOT connected (optional).
+  - Good Nano (proven in socket) currently has PROBE v2 (bezel readout). Real firmware = build_guided (inner pins currently SWAPPED: counter=A0, zero=A1 - UNVERIFIED; the original A1/A0 gave one stop per lap).
+  - Guided firmware verified in prop: homing, light show, select -> parks on BOTTLE, outer self-corrects.
+  - OPEN: inner ring hardware. Need continuity on Nano D8 -> motor board pin 10, and inner sensor outputs -> A0/A1 (+ sensor 5V/GND). Fix joints, then run probe readout (hold inner button: red=A0 / green=A1, every tab vs once per lap), set pins, flash build_guided ONCE.
+  - 3 Nanos lost USB after prop trips (power LED on). Meter socket 5V/VIN before any new board. Minimise plug cycles.
