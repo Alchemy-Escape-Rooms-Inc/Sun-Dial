@@ -68,8 +68,9 @@
 
 #define IR_OUTER_COUNTER A3         // this is for new code upload to device
 #define IR_OUTER_0 A2
-#define IR_INNER_COUNTER A1
-#define IR_INNER_0 A0
+#define IR_INNER_COUNTER A0         // 2026-09-12: inner pair SWAPPED. In the prop the inner ring only
+#define IR_INNER_0 A1               // stopped once per lap (at the home mark) = the "counter" pin was
+                                    // really the zero-mark sensor. Outer pair verified correct as-is.
 
 
 #define STEPPER_O_ENABLE 11
