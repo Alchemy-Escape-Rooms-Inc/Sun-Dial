@@ -272,6 +272,8 @@ pinMode (IR_INNER_COUNTER, INPUT);
 pinMode (STEPPER_O_ENABLE, OUTPUT);
 pinMode (STEPPER_I_ENABLE, OUTPUT);
 pinMode (CHOOSE, INPUT_PULLUP);
+delay (5);
+if (digitalRead (CHOOSE) == LOW) Serial.println ("WARNING: select pin reads PRESSED at boot - stuck button or short on D12");
 
 pinMode (OUTER_CONTROL, OUTPUT);
 digitalWrite (OUTER_CONTROL, LOW);
@@ -491,6 +493,10 @@ inner_counter_state = digitalRead (IR_INNER_COUNTER) ;
 }
 
 choose_state = digitalRead (CHOOSE) ;
+{ // 2026-09-15 diagnostics: trace the select pin on every change
+  static int prev_choose = -1;
+  if (choose_state != prev_choose) { prev_choose = choose_state; Serial.print ("choose pin: "); Serial.println (choose_state == 0 ? "PRESSED" : "released"); }
+}
 
 
 }
@@ -1168,7 +1174,14 @@ void drive_outer_to_target (){
 
 // CHOOSE handling for guided mode: only the current step's combo counts.
 void guided_choose (){
-  if (choose_state != 0) return;                       // not pressed
+  // 2026-09-15: act on the PRESS (edge), not on the level. A held or stuck
+  // select used to re-evaluate every loop pass, so the first moment the
+  // spinning inner ring passed the right number it was accepted as a choice.
+  static bool choose_prev_pressed = 0;
+  bool pressed = (choose_state == 0);
+  bool edge = pressed && !choose_prev_pressed;
+  choose_prev_pressed = pressed;
+  if (!edge) return;                                   // not a new press
   if (current_step >= NUM_STEPS) return;               // finished, waiting for restart
   if (park_timed_out) {                                // motor was stopped by the safety timeout: select retries
     Serial.println ("select -> retry outer travel");
