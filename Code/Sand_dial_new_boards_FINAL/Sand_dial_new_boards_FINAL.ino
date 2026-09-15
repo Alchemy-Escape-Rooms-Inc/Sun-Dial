@@ -72,9 +72,10 @@
 
 #define IR_OUTER_COUNTER A3         // this is for new code upload to device
 #define IR_OUTER_0 A2
-#define IR_INNER_COUNTER A0         // 2026-09-12: inner pair SWAPPED. In the prop the inner ring only
-#define IR_INNER_0 A1               // stopped once per lap (at the home mark) = the "counter" pin was
-                                    // really the zero-mark sensor. Outer pair verified correct as-is.
+#define IR_INNER_COUNTER A1         // 2026-09-15: back to the ORIGINAL pins. With the 09-12 swap (counter=A0)
+#define IR_INNER_0 A0               // the inner ring did a full lap and stopped at 1 every time = A0 is the
+                                    // home-mark sensor, so the tooth sensor must be A1. Watch the 'inner pins'
+                                    // serial trace below if it is still wrong.
 
 // 2026-09-14: the OUTER COUNTER (tooth) sensor broke and is being replaced with a
 // generic break-beam. The original module gives HIGH when a tooth sits in the
@@ -478,6 +479,16 @@ outer_counter_state = outer_counter_read () ;
 
 inner_0_state = digitalRead (IR_INNER_0);
 inner_counter_state = digitalRead (IR_INNER_COUNTER) ;
+
+{ // 2026-09-15 diagnostics: print the two inner sensor pins whenever either changes (max 20 lines/s)
+  static int prev_a0 = -1, prev_a1 = -1; static unsigned long last_ms = 0;
+  int a0 = digitalRead (A0), a1 = digitalRead (A1);
+  if ((a0 != prev_a0 || a1 != prev_a1) && millis () - last_ms >= 50) {
+    prev_a0 = a0; prev_a1 = a1; last_ms = millis ();
+    Serial.print ("inner pins: A0="); Serial.print (a0); Serial.print (" A1="); Serial.print (a1);
+    Serial.print (" count="); Serial.println (inner_counter);
+  }
+}
 
 choose_state = digitalRead (CHOOSE) ;
 
