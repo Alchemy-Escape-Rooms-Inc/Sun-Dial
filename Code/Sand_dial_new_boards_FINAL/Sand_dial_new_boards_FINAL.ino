@@ -72,6 +72,29 @@
 #define IR_INNER_0 A1               // stopped once per lap (at the home mark) = the "counter" pin was
                                     // really the zero-mark sensor. Outer pair verified correct as-is.
 
+// 2026-09-14: the OUTER COUNTER (tooth) sensor broke and is being replaced with a
+// generic break-beam. The original module gives HIGH when a tooth sits in the
+// beam and drives the pin itself. Most hobby break-beams do the OPPOSITE: an
+// open-collector output that is pulled LOW while the beam is blocked, and it
+// needs the Nano's internal pull-up. Pick the sensor type here:
+//   0 = original module  (HIGH = tooth in beam, no pull-up)
+//   1 = replacement break-beam (LOW = tooth in beam, internal pull-up on)
+// Every read of the outer counter goes through outer_counter_read() so this is
+// the ONLY place that needs to change.
+#ifndef OUTER_COUNTER_SENSOR
+#define OUTER_COUNTER_SENSOR 0
+#endif
+
+// Returns HIGH when a tooth of the outer ring is in the counter sensor's beam,
+// whichever sensor is fitted.
+static inline int outer_counter_read (){
+#if OUTER_COUNTER_SENSOR == 1
+  return (digitalRead (IR_OUTER_COUNTER) == LOW) ? HIGH : LOW;
+#else
+  return digitalRead (IR_OUTER_COUNTER);
+#endif
+}
+
 
 #define STEPPER_O_ENABLE 11
 #define STEPPER_I_ENABLE 10
@@ -187,7 +210,11 @@ void setup() {
 
 
 pinMode (IR_OUTER_0, INPUT);
+#if OUTER_COUNTER_SENSOR == 1
+pinMode (IR_OUTER_COUNTER, INPUT_PULLUP);   // open-collector break-beam
+#else
 pinMode (IR_OUTER_COUNTER, INPUT);
+#endif
 pinMode (IR_INNER_0, INPUT);
 pinMode (IR_INNER_COUNTER, INPUT);
 
@@ -393,7 +420,7 @@ if(break_from_lightshow == 1){ break_from_lightshow == 0 ; return; }
 void check_buttons (){
 
 outer_0_state = digitalRead (IR_OUTER_0) ;                //checking the pins
-outer_counter_state = digitalRead (IR_OUTER_COUNTER) ;
+outer_counter_state = outer_counter_read () ;
 
 inner_0_state = digitalRead (IR_INNER_0);
 inner_counter_state = digitalRead (IR_INNER_COUNTER) ;
@@ -440,7 +467,7 @@ digitalWrite (INNER_CONTROL, LOW);             // LOW level stops wheels
 
 void count_outer_ticks () {
 
-outer_counter_state = digitalRead (IR_OUTER_COUNTER) ;
+outer_counter_state = outer_counter_read () ;
 
 
       if (outer_counter_state == 1 && previous_outer_counter_state == 0 ){
@@ -828,7 +855,7 @@ void turn_former_greens_on () {
 // broken sets the counter to 1). After reset_the_wheels() both wheels sit there.
 void sync_counters_to_home (){
   outer_counter = 1;  inner_counter = 1;
-  previous_outer_counter_state = digitalRead (IR_OUTER_COUNTER);
+  previous_outer_counter_state = outer_counter_read ();
   previous_inner_counter_state = digitalRead (IR_INNER_COUNTER);
 }
 
@@ -844,7 +871,7 @@ bool outer_parked (){
 
 // Called whenever the target changes or the counters were just re-synced.
 void outer_drive_rearm (){
-  outer_beam_prev = (digitalRead (IR_OUTER_COUNTER) == HIGH);
+  outer_beam_prev = (outer_counter_read () == HIGH);
   if (outer_counter == guided_target () && outer_beam_prev) outer_drive_state = OD_PARKED;
   else outer_drive_state = OD_DRIVE;
   park_started_ms = millis ();
@@ -894,7 +921,7 @@ void guided_restart (){
 // goes around again (the zero mark re-syncs the count every lap).
 void drive_outer_to_target (){
   if (park_timed_out) { digitalWrite (OUTER_CONTROL, LOW); return; }
-  bool beam = (digitalRead (IR_OUTER_COUNTER) == HIGH);   // HIGH = tooth in the beam
+  bool beam = (outer_counter_read () == HIGH);   // HIGH = tooth in the beam
 
   switch (outer_drive_state) {
 
