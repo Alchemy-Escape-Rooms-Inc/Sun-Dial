@@ -492,3 +492,4 @@ STATE FOR NEXT SESSION:
 [2026-09-14 21:55] METER: A3 signal 0.95 V clear / 0 V blocked -> receiver good, line held low by a pull-down on the old pad vs internal pull-up. FIX = external 2.2k (1k-4.7k) pull-up signal->5V, no reflash. Sent to laptop.
 [2026-09-14 21:57] Laptop: tabs passing show no meter change (only finger). Told them: meter too slow for moving tabs; pull-up first, then stationary-tab test to check beam geometry. No reflash.
 [2026-09-14 23:09] Topic silent ~1 h after the pull-up fix was sent. Watch re-armed. Memory updated. Awaiting: post-pull-up voltage + whether outer parks on bottle.
+[2026-09-15 13:06] User: after rework signal idles 4.66 V but NO drop when beam blocked (before: 0.95 -> 0). Pull-up works; receiver no longer sinking. Asked: resistor value (<1k too strong), receiver 5V/GND intact, meter at receiver's own signal wire vs at A3.

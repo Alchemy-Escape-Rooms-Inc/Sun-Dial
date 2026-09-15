@@ -20,6 +20,10 @@
   //    sampled the beam every 35 ms, so fast teeth were missed, the count
   //    never reached the target and the wheel spun forever.
   //
+  //    v2.2 (2026-09-15): TIMED outer drive. The outer tooth sensor died and
+  //    no replacement worked, so the outer wheel is positioned by time from
+  //    the home mark (see OUTER_DRIVE_TIMED below). Tooth sensor no longer used.
+  //
   //    SERIAL -> MQTT: Nano D1 (TX) -> divider (2k2 top / 3k3 bottom) -> ESP32
   //    GPIO 18. The bridge parses "outer counter = N" / "inner counter = N" and
   //    publishes MermaidsTale/SunDial/Outer and /Inner. Set GUIDED_MODE 0
@@ -84,6 +88,19 @@
 #ifndef OUTER_COUNTER_SENSOR
 #define OUTER_COUNTER_SENSOR 0
 #endif
+
+// 2026-09-15 TIMED OUTER DRIVE (v2.2): no working tooth sensor on the outer ring.
+// The outer wheel is a stepper running at a fixed rate, so distance = time. Every
+// move: drive to the home mark (outer ZERO sensor, still good), then keep driving
+// for (target-1) tooth-times and stop. The tooth-time is one full lap, measured
+// once at boot from two consecutive zero-mark edges, divided by OUTER_TEETH.
+// Set OUTER_DRIVE_TIMED 0 to get the tooth-sensor driver back.
+#ifndef OUTER_DRIVE_TIMED
+#define OUTER_DRIVE_TIMED 1
+#endif
+#define OUTER_TEETH 10                 // symbol positions on the outer ring
+#define OUTER_LAP_MS 0                 // 0 = measure at boot; or bake in the 'outer lap = N ms' value printed on serial
+#define OUTER_PARK_OFFSET_MS 0         // + runs a little further past the computed stop, - stops earlier (tune if it parks off-centre)
 
 // Returns HIGH when a tooth of the outer ring is in the counter sensor's beam,
 // whichever sensor is fitted.
@@ -202,8 +219,41 @@ bool was_parked = 0;
 #define OD_PARKED 3   // sitting on the target tooth
 int outer_drive_state = OD_DRIVE;
 bool outer_beam_prev = 0;
+bool outer_timed_active = 0;           // timed driver is moving the outer wheel: loop() holds INNER_CONTROL low
+#if OUTER_DRIVE_TIMED
+#define OT_LEAVE_ZERO 0   // drive off the home mark
+#define OT_SEEK_ZERO  1   // drive until the home mark's rising edge
+#define OT_TIMED      2   // drive for (target-1) tooth-times past that edge
+#define OT_PARKED     3   // stopped on the target
+int ot_state = OT_LEAVE_ZERO;
+unsigned long ot_lap_ms = OUTER_LAP_MS;   // one full lap in ms (0 = not measured yet)
+unsigned long ot_zero_ms = 0;             // millis() at the last zero rising edge
+unsigned long ot_cal_edge_ms = 0;         // first edge of a calibration lap (0 = none in progress)
+unsigned long ot_seek_started = 0;
+bool ot_zero_prev = 0;
+int ot_inner_snapshot = 0;
+int ot_reported = 0;
+#endif
 unsigned long outer_dwell_start = 0;
 const unsigned long OUTER_DWELL_MS = 250;
+
+// Forward declarations (the Arduino prototype generator loses these behind the #if blocks)
+void guided_begin ();
+void guided_restart ();
+void announce_step ();
+void outer_drive_rearm ();
+void drive_outer_to_target ();
+bool outer_parked ();
+int guided_target ();
+void guided_choose ();
+void check_trigger ();
+void smartDelay (unsigned long delay_interval);
+#if OUTER_DRIVE_TIMED
+void ot_park ();
+void ot_fail (const char* why);
+unsigned long ot_tooth_ms ();
+unsigned long ot_run_ms ();
+#endif
 
 void setup() {
 
@@ -324,10 +374,14 @@ if(outer_counter_state == HIGH){digitalWrite (OUTER_CONTROL, LOW);}             
 if(outer_counter_state == LOW){digitalWrite (OUTER_CONTROL, HIGH);}
            // if beam isnt interupted write OUTER_CONTROL pin high, signals to motor control code to spin outer
 }
+if (GUIDED_MODE && outer_timed_active) {
+  digitalWrite (INNER_CONTROL, LOW);          // outer is on a timed run: do not let the inner snap-to-tooth slow it down
+} else {
 if(inner_counter_state == HIGH){digitalWrite (INNER_CONTROL, LOW); }
      //if beam is interupted write INNER_CONTROL pin low which signals the motor control that it can stop inner spin
 if(inner_counter_state == LOW){digitalWrite (INNER_CONTROL, HIGH);}
      // if beam isnt interupted write INNER_CONTROL pin low, signals to motor controller to spin inner
+}
 
 
 }
@@ -866,17 +920,11 @@ int guided_target (){
 
 // Parked = counter says we're on the target AND the beam is broken (sitting on a tooth).
 bool outer_parked (){
+#if OUTER_DRIVE_TIMED
+  return ot_state == OT_PARKED;
+#else
   return outer_drive_state == OD_PARKED;
-}
-
-// Called whenever the target changes or the counters were just re-synced.
-void outer_drive_rearm (){
-  outer_beam_prev = (outer_counter_read () == HIGH);
-  if (outer_counter == guided_target () && outer_beam_prev) outer_drive_state = OD_PARKED;
-  else outer_drive_state = OD_DRIVE;
-  park_started_ms = millis ();
-  park_timed_out = 0;
-  was_parked = 0;
+#endif
 }
 
 void announce_step (){
@@ -910,6 +958,131 @@ void guided_restart (){
   turn_bezel_white ();
   if (GUIDED_MODE) guided_begin ();
 }
+
+#if OUTER_DRIVE_TIMED
+// ---------------- timed outer driver (no tooth sensor) ----------------
+unsigned long ot_tooth_ms (){ return ot_lap_ms / OUTER_TEETH; }
+
+unsigned long ot_run_ms (){               // how long to keep driving after the zero edge
+  long t = (long)(guided_target () - 1) * (long)ot_tooth_ms () + (long)OUTER_PARK_OFFSET_MS;
+  return t < 0 ? 0 : (unsigned long)t;
+}
+
+void ot_park (){
+  digitalWrite (OUTER_CONTROL, LOW);
+  outer_timed_active = 0;
+  outer_counter = guided_target ();
+  ot_state = OT_PARKED; was_parked = 1;
+  Serial.print ("parked outer="); Serial.println (outer_counter);
+}
+
+void ot_fail (const char* why){
+  digitalWrite (OUTER_CONTROL, LOW);
+  outer_timed_active = 0;
+  park_timed_out = 1;
+  Serial.print ("ERROR outer wheel "); Serial.print (why); Serial.println (" - motor stopped (select to retry)");
+}
+
+// Called whenever the target changes or after homing.
+void outer_drive_rearm (){
+  ot_state = OT_LEAVE_ZERO;
+  ot_zero_prev = (digitalRead (IR_OUTER_0) == HIGH);
+  ot_seek_started = millis ();
+  ot_cal_edge_ms = 0;
+  ot_inner_snapshot = inner_counter;
+  park_started_ms = millis ();
+  park_timed_out = 0;
+  was_parked = 0;
+  outer_timed_active = 1;
+  Serial.print ("outer: seek zero, target "); Serial.println (guided_target ());
+}
+
+// Non-blocking, called every loop pass.
+void drive_outer_to_target (){
+  if (park_timed_out) { digitalWrite (OUTER_CONTROL, LOW); outer_timed_active = 0; return; }
+  bool zero = (digitalRead (IR_OUTER_0) == HIGH);
+  bool zero_edge = zero && !ot_zero_prev;
+  ot_zero_prev = zero;
+  unsigned long now = millis ();
+
+  static unsigned long last_dbg = 0;            // once-a-second trace while moving
+  if (ot_state != OT_PARKED && now - last_dbg >= 1000) {
+    last_dbg = now;
+    Serial.print ("drive: state="); Serial.print (ot_state);
+    Serial.print (" zero=");        Serial.print (zero);
+    Serial.print (" lap_ms=");      Serial.print (ot_lap_ms);
+    Serial.print (" target=");      Serial.println (guided_target ());
+  }
+
+  // If the inner ring moves while the outer is travelling, the motor board slows
+  // the outer wheel (it steps both in one loop), so the timing is void: go again.
+  bool inner_moved = (inner_counter != ot_inner_snapshot);
+
+  switch (ot_state) {
+
+    case OT_LEAVE_ZERO:
+      digitalWrite (OUTER_CONTROL, HIGH);
+      if (!zero) ot_state = OT_SEEK_ZERO;
+      else if (now - ot_seek_started > PARK_TIMEOUT_MS) ot_fail ("never left the zero mark");
+      break;
+
+    case OT_SEEK_ZERO:
+      digitalWrite (OUTER_CONTROL, HIGH);
+      if (ot_cal_edge_ms != 0 && inner_moved) {          // calibration lap spoiled
+        Serial.println ("outer: inner moved during calibration lap - measuring again");
+        ot_cal_edge_ms = 0; ot_inner_snapshot = inner_counter;
+      }
+      if (zero_edge) {
+        if (ot_lap_ms == 0) {                             // need two edges one lap apart
+          if (ot_cal_edge_ms == 0) {
+            ot_cal_edge_ms = now; ot_inner_snapshot = inner_counter;
+            Serial.println ("outer: calibration lap");
+            break;
+          }
+          ot_lap_ms = now - ot_cal_edge_ms; ot_cal_edge_ms = 0;
+          Serial.print ("outer lap = "); Serial.print (ot_lap_ms); Serial.println (" ms");
+        }
+        ot_zero_ms = now;
+        ot_inner_snapshot = inner_counter;
+        ot_reported = 1;
+        outer_counter = 1;
+        Serial.println ("outer counter = 1");
+        if (ot_run_ms () == 0) ot_park ();
+        else ot_state = OT_TIMED;
+      } else if (now - ot_seek_started > PARK_TIMEOUT_MS) ot_fail ("never saw the zero mark");
+      break;
+
+    case OT_TIMED: {
+      digitalWrite (OUTER_CONTROL, HIGH);
+      unsigned long el = now - ot_zero_ms;
+      int est = 1 + (int)(el / ot_tooth_ms ());           // estimated position for the bridge
+      if (est > ot_reported && est <= OUTER_TEETH) {
+        ot_reported = est; outer_counter = est;
+        Serial.print ("outer counter = "); Serial.println (est);
+      }
+      if (inner_moved) {
+        Serial.println ("outer: inner moved during travel - redoing from zero");
+        ot_state = OT_LEAVE_ZERO; ot_seek_started = now; ot_inner_snapshot = inner_counter;
+      } else if (el >= ot_run_ms ()) ot_park ();
+      break; }
+
+    case OT_PARKED:
+      digitalWrite (OUTER_CONTROL, LOW);
+      break;
+  }
+}
+
+#else
+// Called whenever the target changes or the counters were just re-synced.
+void outer_drive_rearm (){
+  outer_beam_prev = (outer_counter_read () == HIGH);
+  if (outer_counter == guided_target () && outer_beam_prev) outer_drive_state = OD_PARKED;
+  else outer_drive_state = OD_DRIVE;
+  park_started_ms = millis ();
+  park_timed_out = 0;
+  was_parked = 0;
+}
+
 
 // Non-blocking: called every loop pass. Spins the outer wheel until it sits on
 // the target tooth, then holds it there. If it gets nudged off, it goes around
@@ -980,6 +1153,7 @@ void drive_outer_to_target (){
   }
   outer_beam_prev = beam;
 }
+#endif  // OUTER_DRIVE_TIMED
 
 // CHOOSE handling for guided mode: only the current step's combo counts.
 void guided_choose (){
@@ -991,9 +1165,9 @@ void guided_choose (){
     delay (500);
     return;
   }
-  if (!outer_parked ()) {                              // wheel still travelling - ignore the press
-    Serial.println ("choose ignored (outer moving)");
-    delay (300);
+  if (!outer_parked ()) {                              // wheel still travelling - ignore the press (no delay: a timed run is in progress)
+    static unsigned long last_ign = 0;
+    if (millis () - last_ign > 500) { last_ign = millis (); Serial.println ("choose ignored (outer moving)"); }
     return;
   }
   outer_choice = outer_counter;
