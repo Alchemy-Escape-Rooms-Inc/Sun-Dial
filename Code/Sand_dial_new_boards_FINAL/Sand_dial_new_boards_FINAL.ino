@@ -927,6 +927,17 @@ void drive_outer_to_target (){
 
     case OD_DRIVE:
       digitalWrite (OUTER_CONTROL, HIGH);
+      { // 2026-09-14 diagnostics: once a second while driving, show the raw sensor pins
+        static unsigned long last_dbg = 0;
+        if (millis () - last_dbg >= 1000) {
+          last_dbg = millis ();
+          Serial.print ("drive: A3raw="); Serial.print (digitalRead (IR_OUTER_COUNTER));
+          Serial.print (" beam=");        Serial.print (beam);
+          Serial.print (" A2zero=");      Serial.print (digitalRead (IR_OUTER_0));
+          Serial.print (" count=");       Serial.print (outer_counter);
+          Serial.print (" target=");      Serial.println (guided_target ());
+        }
+      }
       if (beam && !outer_beam_prev) {                     // a tooth just arrived
         digitalWrite (OUTER_CONTROL, LOW);
         outer_counter = outer_counter + 1;
