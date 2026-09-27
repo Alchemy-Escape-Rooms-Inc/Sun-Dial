@@ -24,12 +24,12 @@
 //       until the next select.
 //
 //  WIRING CHANGES vs guided v2.x (REQUIRED):
-//    * BOTH player buttons move from the motor Nano (D4 inner, D5 outer) to
-//      THIS board: OUTER_BUTTON_PIN / INNER_BUTTON_PIN below. Default A6 / A7:
-//      analog-only pins, so each needs a 10k pull-up to 5 V; button to GND.
-//      Any free digital pin works instead (set the pin and ..._ANALOG 0).
-//      HOUSE_6/D7 is free ONLY if the Wrong wire to the bridge was never
-//      connected. D0 (RX) is usable too but loses the USB bench keys.
+//    * BOTH player buttons move from the motor Arduino (D4 inner, D5 outer) to
+//      THIS board: OUTER button -> A3 (old outer tooth-sensor connector),
+//      INNER button -> D7 (old HOUSE_6 "wrong" connector, never wired to the
+//      bridge). Button to GND, internal pull-ups. See the defines below for
+//      polarity and the A6/A7 alternative. With D7 as a button the Wrong pulse
+//      to the bridge is off (it never reached the bridge anyway).
 //    * Motor board gets SunDial_Motor v2.0 (independent step timers, slow
 //      speeds). The old motor sketch also works but the outer slows whenever
 //      the inner runs, which upsets the timed position.
@@ -56,7 +56,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.1.0"
+#define FW_VERSION "3.1.1"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -74,17 +74,32 @@
 #define HOUSE_5           6       // trident -> bridge GPIO15 -> SunDial/Trident
 #define HOUSE_6           7       // wrong   -> bridge GPIO16 -> SunDial/Wrong
 
+// Player buttons (moved off the motor Arduino). 2026-09-27 photo of the carrier
+// board: two connectors are free and already broken out, so no resistors:
+//   A3 = the dead outer tooth-sensor input  -> OUTER button
+//   D7 = HOUSE_6 "wrong" line, never wired to the bridge -> INNER button
+// Button between the pin and GND, internal pull-up, pressed = LOW. If a pad
+// has a pull-down resistor on the carrier (the old A3 sensor pad did), wire
+// that button between the pin and +5 V instead and set its ACTIVE_LOW to 0.
+// The boot log says "reads PRESSED at boot" when the polarity is wrong.
+// A6/A7 (analog-only, need an external 10k pull-up) still work: set *_ANALOG 1.
 #ifndef OUTER_BUTTON_PIN
-#define OUTER_BUTTON_PIN     A6   // players' outer button (moved off the motor board)
+#define OUTER_BUTTON_PIN     A3
 #endif
 #ifndef OUTER_BUTTON_ANALOG
-#define OUTER_BUTTON_ANALOG  1    // 1 = analog-only pin (A6/A7) with external 10k pull-up
+#define OUTER_BUTTON_ANALOG  0
+#endif
+#ifndef OUTER_BUTTON_ACTIVE_LOW
+#define OUTER_BUTTON_ACTIVE_LOW 1
 #endif
 #ifndef INNER_BUTTON_PIN
-#define INNER_BUTTON_PIN     A7   // players' inner button (moved off the motor board)
+#define INNER_BUTTON_PIN     7
 #endif
 #ifndef INNER_BUTTON_ANALOG
-#define INNER_BUTTON_ANALOG  1
+#define INNER_BUTTON_ANALOG  0
+#endif
+#ifndef INNER_BUTTON_ACTIVE_LOW
+#define INNER_BUTTON_ACTIVE_LOW 1
 #endif
 #define ANALOG_PRESSED_BELOW 400  // analogRead under this = pressed (pulled up, button to GND)
 
@@ -378,9 +393,9 @@ void home_wheels () {
 }
 
 // ---------------------------------------------------------------- inputs
-bool read_button_raw (uint8_t pin, bool analog) {
-  if (analog) return analogRead (pin) < ANALOG_PRESSED_BELOW;
-  return digitalRead (pin) == LOW;
+bool read_button_raw (uint8_t pin, bool analog, bool active_low) {
+  bool low = analog ? (analogRead (pin) < ANALOG_PRESSED_BELOW) : (digitalRead (pin) == LOW);
+  return active_low ? low : !low;
 }
 void debounce (Button& b, bool raw, unsigned long now) {
   if (raw != b.raw_prev) { b.raw_prev = raw; b.raw_since = now; }
@@ -389,8 +404,8 @@ void debounce (Button& b, bool raw, unsigned long now) {
   b.edge = b.state && !b.prev;
 }
 void read_inputs (unsigned long now) {
-  debounce (btn_outer, read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG), now);
-  debounce (btn_inner, read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG), now);
+  debounce (btn_outer, read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, OUTER_BUTTON_ACTIVE_LOW), now);
+  debounce (btn_inner, read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG, INNER_BUTTON_ACTIVE_LOW), now);
   if (btn_outer.edge) Serial.println (F("outer button: PRESSED"));
   if (btn_inner.edge) Serial.println (F("inner button: PRESSED"));
 
@@ -443,7 +458,7 @@ void spin_both (unsigned long now) {
 }
 void start_game () {
   for (int s = 0; s < NUM_SYMBOLS; s++) solved_sym[s] = false;
-  for (int p = 2; p <= 7; p++) digitalWrite (p, LOW);
+  for (int p = 2; p <= 7; p++) if (p != OUTER_BUTTON_PIN && p != INNER_BUTTON_PIN) digitalWrite (p, LOW);
   current_step = 0;
   all_leds (0, 0, 0);
   home_wheels ();
@@ -481,10 +496,10 @@ void handle_choose () {
     solved_sym[st.answer] = true;
     next_step ();
   } else {
-    digitalWrite (HOUSE_6, HIGH);               // -> MQTT SunDial/Wrong true
+    if (INNER_BUTTON_PIN != HOUSE_6 && OUTER_BUTTON_PIN != HOUSE_6) digitalWrite (HOUSE_6, HIGH);   // -> MQTT SunDial/Wrong true (not when D7 is a button)
     all_leds (255, 0, 0);
     delay (FEEDBACK_MS);
-    digitalWrite (HOUSE_6, LOW);
+    if (INNER_BUTTON_PIN != HOUSE_6 && OUTER_BUTTON_PIN != HOUSE_6) digitalWrite (HOUSE_6, LOW);
     repaint_all ();
     if (outer_state == OUT_FAULT) return;
     spin_both (millis ());                      // both wheels go again
@@ -533,7 +548,7 @@ void setup () {
   pinMode (OUTER_CONTROL, OUTPUT); outer_stop ();
   pinMode (INNER_CONTROL, OUTPUT); digitalWrite (INNER_CONTROL, LOW);
   pinMode (CHOOSE, INPUT_PULLUP);
-  for (int p = 2; p <= 7; p++) { pinMode (p, OUTPUT); digitalWrite (p, LOW); }
+  for (int p = 2; p <= 7; p++) { if (p == OUTER_BUTTON_PIN || p == INNER_BUTTON_PIN) continue; pinMode (p, OUTPUT); digitalWrite (p, LOW); }
 #if !OUTER_BUTTON_ANALOG
   pinMode (OUTER_BUTTON_PIN, INPUT_PULLUP);
 #endif
@@ -543,8 +558,8 @@ void setup () {
   delay (5);
   Serial.print (F("SunDial SpinStop v")); Serial.println (FW_VERSION);
   bool select_held = digitalRead (CHOOSE) == LOW;
-  if (read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG)) Serial.println (F("WARNING: outer button reads PRESSED at boot - check its wire / pull-up"));
-  if (read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG)) Serial.println (F("WARNING: inner button reads PRESSED at boot - check its wire / pull-up"));
+  if (read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, OUTER_BUTTON_ACTIVE_LOW)) Serial.println (F("WARNING: outer button reads PRESSED at boot - check its wire / pull-up"));
+  if (read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG, INNER_BUTTON_ACTIVE_LOW)) Serial.println (F("WARNING: inner button reads PRESSED at boot - check its wire / pull-up"));
 
   for (int i = 0; i < LED_BOARDS; i++) { pwmBoard[i].begin (); pwmBoard[i].setOscillatorFrequency (27000000); pwmBoard[i].setPWMFreq (50); }
   all_leds (0, 0, 0);
@@ -556,7 +571,7 @@ void setup () {
   delay (1000);
   all_leds (0, 0, 0);
   digitalWrite (STEPPER_O_ENABLE, HIGH); digitalWrite (STEPPER_I_ENABLE, HIGH);
-  randomSeed (analogRead (A3));
+  randomSeed (analogRead (A7));
   phase = PH_ATTRACT;
   Serial.println (F("attract (select to start)"));
 }
