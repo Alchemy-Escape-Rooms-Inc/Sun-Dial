@@ -1,5 +1,5 @@
 //  SunDialSky  -  ESP32-S3 driver for the sky-writing video beside the SunDial
-//  v1.0.0 (2026-09-27)
+//  v1.1.0 (2026-09-27): two files per clue - hold loop 00N + play-once transition 01N
 //
 //  The screen next to the sundial shows Red Beard's ship in the distance. Each
 //  sundial question gets its own video file with the clue written in the
@@ -7,10 +7,10 @@
 //  MermaidsTale/SunDial/Clue ("0" idle, "1".."5", "solved"); this board maps it
 //  to a file on the Sprite's card and tells the player to LOOP that file:
 //
-//      Clue payload    Sprite file
-//      0 / anything    000   plain sky, ship in the distance (idle)
-//      1..5            001..005   clue for question N in the clouds
-//      solved          006   (SOLVED_FILE; set 0 to just go back to the sky)
+//      Clue payload    Sprite hold file (loops)     played once first
+//      0 / anything    000   plain sky (idle)         -
+//      1..5            001..005   words for question N   011..015 (old words out, new in)
+//      solved          006   (SOLVED_FILE)            016
 //
 //  Player: MedeaWiz Sprite DV-S1, Control Mode = Serial Control, 9600 baud,
 //  firmware >= 20180704. Wire GPIO4 (Serial1 TX) -> Sprite I/O plug serial RX,
@@ -46,6 +46,7 @@
 #define SPRITE_BAUD    9600
 #define LAST_CLUE      5          // files 001..005
 #define SOLVED_FILE    6          // file shown after the fifth solve (0 = back to the idle sky)
+#define TRANSITION_BASE 10        // play-once transition files: clue N -> file (TRANSITION_BASE + N), solved -> +SOLVED_FILE. 0 = no transitions
 #define MQTT_RETRY_MS  5000UL
 
 static const char* OTA_PASSWORD = WIFI_PASS;   // protocol: OTA password = Wi-Fi password
@@ -73,11 +74,25 @@ const char* stateStr() {
 }
 
 // ---------------------------------------------------------------- Sprite
-void spriteLoopFile(uint8_t fileNum) {
+void spriteLoopFile(uint8_t fileNum) {           // 0xFC <n> = hold (loop) file n
   Serial1.write((uint8_t)0xFC);
   Serial1.write(fileNum);
   currentFile = fileNum;
   prefs.putUChar("file", currentFile);
+}
+void spritePlayOnce(uint8_t fileNum) {           // <n> alone = play file n once, then fall back into the loop file
+  if (fileNum == 0) return;
+  Serial1.write(fileNum);
+}
+// v1.1.0: seamless hand-over. Set the new hold file first, then play the
+// transition file once (old words fade out, new words fade in); when it ends
+// the player drops into the hold loop by itself. See Docs/SkyVideos.md.
+void spriteShow(uint8_t holdFile, bool withTransition) {
+  spriteLoopFile(holdFile);
+  if (withTransition && TRANSITION_BASE > 0 && holdFile > 0) {
+    delay(60);
+    spritePlayOnce((uint8_t)(TRANSITION_BASE + holdFile));
+  }
 }
 void showClue(const char* clue) {
   strncpy(currentClue, clue, sizeof(currentClue) - 1);
@@ -87,8 +102,10 @@ void showClue(const char* clue) {
     int n = atoi(clue);
     if (n >= 1 && n <= LAST_CLUE) file = (uint8_t)n;
   }
-  spriteLoopFile(file);
-  mqttLogf("%s: clue '%s' -> Sprite file %03d", PROP_NAME, clue, file);
+  bool changed = (file != currentFile);
+  spriteShow(file, changed);                     // transition only when the clue actually changes (not on a retained replay)
+  mqttLogf("%s: clue '%s' -> Sprite hold %03d%s", PROP_NAME, clue, file,
+           (changed && TRANSITION_BASE > 0 && file > 0) ? " via transition" : "");
 }
 
 // ---------------------------------------------------------------- Wi-Fi / OTA / MQTT
