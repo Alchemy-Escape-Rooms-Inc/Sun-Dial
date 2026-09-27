@@ -81,12 +81,15 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <esp_task_wdt.h>
+#include <ArduinoOTA.h>   // 4.6.0: MANDATORY per mqtt-protocol.md (2026-09-22): wireless re-flash
 #include "MANIFEST.h"  // single source of truth for device identity/broker/heartbeat
 
 #define FW_VERSION FIRMWARE_VERSION
 
 const char* WIFI_SSID = "AlchemyGuest";
 const char* WIFI_PASS = "VoodooVacation5601";
+static const char* OTA_PASSWORD = WIFI_PASS;   // protocol: OTA password = Wi-Fi password
+bool otaReady = false;
 
 const char*    MQTT_HOST   = BROKER_IP;
 const uint16_t MQTT_PORT   = BROKER_PORT;
@@ -97,6 +100,7 @@ const char*    TOPIC_GAMESTART = "MermaidsTale/GameStart";     // 4.5.0: pulse t
 const char*    TOPIC_OUTER = "MermaidsTale/SunDial/Outer";     // 4.5.0: outer ring position
 const char*    TOPIC_INNER = "MermaidsTale/SunDial/Inner";     // 4.5.0: inner ring position
 const char*    TOPIC_NANO  = "MermaidsTale/SunDial/nano";      // 4.5.0: mirrored Nano serial
+const char*    TOPIC_CLUE  = "MermaidsTale/SunDial/Clue";      // 4.6.0: current clue 1..5 / 0 idle / solved (retained) for the sky video board
 
 // 4.5.0 Nano link
 const int      TRIGGER_OUT_PIN   = 17;    // -> Nano A6
@@ -195,11 +199,12 @@ void publishHeartbeat() {
 }
 
 void publishStatus() {
-  char buf[120];
+  char buf[160];
   unsigned long uptime = (millis() - bootMs) / 1000UL;
   snprintf(buf, sizeof(buf),
-           "STATUS:RUNNING:UP%lus:RSSI%d:VER%s:OUTER%d:INNER%d",
-           uptime, WiFi.RSSI(), FW_VERSION, lastOuter, lastInner);
+           "STATUS:RUNNING:UP%lus:RSSI%d:VER%s:OUTER%d:INNER%d:IP:%s:OTA:%d",
+           uptime, WiFi.RSSI(), FW_VERSION, lastOuter, lastInner,
+           WiFi.localIP().toString().c_str(), OTA_PORT);
   mqtt.publish(TOPIC_STAT, buf);
 }
 
@@ -230,6 +235,13 @@ void serviceTriggerPulse() {
   }
 }
 
+// 4.6.0: current clue for the sky-writing video (retained; 0 = idle boat).
+void publishClueStr(const char* v) {
+  if (mqtt.connected()) mqtt.publish(TOPIC_CLUE, v, true);
+  char buf[48]; snprintf(buf, sizeof(buf), "[CLUE] %s", v); logLine(buf);
+}
+void publishClue(int n) { char v[8]; snprintf(v, sizeof(v), "%d", n); publishClueStr(v); }
+
 // 4.5.0: one complete line from the Nano.
 void handleNanoLine(char* line) {
   // trim leading spaces (the Nano prints " reset wheels")
@@ -248,6 +260,13 @@ void handleNanoLine(char* line) {
     if (mqtt.connected()) mqtt.publish(TOPIC_INNER, v, false);
     return;
   }
+  // 4.6.0: SpinStop controller v3.1 prints "step=N clues=... answer=..." when a
+  // new question starts, "SOLVED - all symbols" at the end and "attract ..." when
+  // idle. Publish the clue number RETAINED so the sky video board (SunDialSky)
+  // can pick the right clouds even after a reboot.
+  if (sscanf(line, "step=%d", &n) == 1) { publishClue(n); }
+  else if (strncmp(line, "SOLVED", 6) == 0) { publishClueStr("solved"); }
+  else if (strncmp(line, "attract", 7) == 0) { publishClue(0); }
   // The Nano prints a bare number + " off" per LED at boot; skip that chatter.
   if (strcmp(line, "off") == 0 || (line[0] >= '0' && line[0] <= '9' && line[1] == 0)) return;
   unsigned long now = millis();
@@ -310,12 +329,26 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     mqtt.publish(TOPIC_STAT, "OK");
     logLine("[CMD] PUZZLE_RESET — clearing symbols");
     resetSymbols();
+    publishClue(0);                                            // 4.6.0: sky back to the idle boat
     pulseNano("PUZZLE_RESET");
   } else if (strcmp(msg, "CLEAR_STATUS") == 0) {
     mqtt.publish(TOPIC_STAT, "OK");
     mqtt.publish(TOPIC_STAT, "", true);  // wipe retained
     logLine("[CMD] CLEAR_STATUS — wiped retained status");
   }
+}
+
+// 4.6.0: over-the-air updates (hostname SunDial, port 3232, Wi-Fi password).
+void setupOTA() {
+  ArduinoOTA.setHostname(OTA_HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() { digitalWrite(TRIGGER_OUT_PIN, LOW); logLine("OTA update starting - back in ~30 s"); });
+  ArduinoOTA.onProgress([](unsigned int, unsigned int) { esp_task_wdt_reset(); });   // a slow upload must not trip the 30 s watchdog
+  ArduinoOTA.onEnd([]()   { Serial.println("OTA done, rebooting"); });
+  ArduinoOTA.onError([](ota_error_t e) { Serial.printf("OTA error %u\n", (unsigned)e); });
+  ArduinoOTA.begin();
+  otaReady = true;
+  char buf[64]; snprintf(buf, sizeof(buf), "OTA ready %s:%d", WiFi.localIP().toString().c_str(), OTA_PORT); logLine(buf);
 }
 
 void ensureWiFi() {
@@ -383,6 +416,8 @@ void setup() {
 void loop() {
   esp_task_wdt_reset();
   ensureWiFi();
+  if (!otaReady && WiFi.status() == WL_CONNECTED) setupOTA();   // 4.6.0
+  if (otaReady) ArduinoOTA.handle();
   ensureMqtt();
   mqtt.loop();
   serviceTriggerPulse();   // 4.5.0

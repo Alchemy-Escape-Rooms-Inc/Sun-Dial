@@ -15,8 +15,9 @@
 //       Wrong (either wheel off, or a wheel still spinning) = red 2 s + HOUSE_6
 //       (SunDial/Wrong), then both wheels spin again.
 //    4. Five steps: two plain (the clue IS the symbol), two with a pair of clues
-//       and one with three clues, where the answer is the symbol the clues have
-//       in common (see STEPS). All five answers are the five countable things in
+//       and one with three clues, where the answer is what the clues point at
+//       (see STEPS). Each step also prints "step=N ..." which the bridge turns
+//       into MermaidsTale/SunDial/Clue = N for the sky-writing video next door. All five answers are the five countable things in
 //       the jungle, so the bridge/M3 wiring is unchanged: HOUSE_1..5 = five
 //       symbols, HOUSE_6 = wrong.
 //    5. After the fifth: green celebration, wheels home, attract light show
@@ -124,9 +125,9 @@ struct Step { uint8_t nclues; uint8_t clues[MAX_CLUES]; uint8_t answer; uint8_t 
 const Step STEPS[] = {
   { 1, { S_BOTTLE,     0,          0          }, S_BOTTLE,  3, HOUSE_1 },   // plain
   { 1, { S_TRIDENT,    0,          0          }, S_TRIDENT, 1, HOUSE_5 },   // plain
-  { 2, { S_LIGHTHOUSE, S_SHARK,    0          }, S_SKULL,   4, HOUSE_2 },   // warnings of the sea
-  { 2, { S_BOTTLE,     S_SKULL,    0          }, S_COCONUT, 9, HOUSE_4 },   // what pirates drink from
-  { 3, { S_SHARK,      S_CRAB,     S_SEAHORSE }, S_TURTLE,  7, HOUSE_3 },   // the missing animal
+  { 2, { S_COCONUT,    S_CRAB,     0          }, S_TURTLE,  7, HOUSE_3 },   // hard shells: what's the third?
+  { 2, { S_LIGHTHOUSE, S_ANCHOR,   0          }, S_COCONUT, 9, HOUSE_4 },   // land ahoy, drop anchor: what's on the island?
+  { 3, { S_SHARK,      S_TRIDENT,  S_BOTTLE   }, S_SKULL,   4, HOUSE_2 },   // three ways a pirate dies: eaten, speared, rum
 };
 const int NUM_STEPS = sizeof (STEPS) / sizeof (STEPS[0]);
 
