@@ -1,4 +1,4 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.1.0  (2026-09-27)
+//  SunDial_SpinStop  -  controller Nano firmware v3.2.0  (2026-10-03)
 //
 //  THE GAME ("spin and stop"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, then BOTH
@@ -30,9 +30,11 @@
 //      bridge). Button to GND, internal pull-ups. See the defines below for
 //      polarity and the A6/A7 alternative. With D7 as a button the Wrong pulse
 //      to the bridge is off (it never reached the bridge anyway).
-//    * Motor board gets SunDial_Motor v2.0 (independent step timers, slow
-//      speeds). The old motor sketch also works but the outer slows whenever
-//      the inner runs, which upsets the timed position.
+//    * Motor board MUST run SunDial_Motor v2.1+ (flash both boards together).
+//      Since v3.2.0 "turn this wheel" is a 500 Hz square wave on the control
+//      line and any steady level means stop, so a controller that is missing,
+//      unpowered or hung leaves the wheels standing still instead of spinning
+//      forever. An older motor sketch would read the square wave as stutter.
 //
 //  POSITION: the outer tooth sensor is dead, so the outer position is kept by
 //  TIME from the home-mark edge (one lap measured at every game start unless
@@ -56,7 +58,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.1.1"
+#define FW_VERSION "3.2.0"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -65,8 +67,8 @@
 #define STEPPER_O_ENABLE  11
 #define STEPPER_I_ENABLE  10
 #define CHOOSE            12      // select button, to GND, internal pull-up
-#define OUTER_CONTROL     9       // HIGH = motor board turns the outer wheel
-#define INNER_CONTROL     8       // HIGH = motor board turns the inner wheel
+#define OUTER_CONTROL     9       // PB1: 500 Hz square wave = motor board turns the outer wheel, steady = stop
+#define INNER_CONTROL     8       // PB0: same for the inner wheel
 #define HOUSE_1           2       // bottle  -> bridge GPIO4  -> SunDial/Bottle
 #define HOUSE_2           3       // skull   -> bridge GPIO5  -> SunDial/Crab   (topic keeps its old name)
 #define HOUSE_3           4       // turtle  -> bridge GPIO6  -> SunDial/Turtle
@@ -243,8 +245,17 @@ void twinkle (unsigned long ms) {
 }
 
 // ---------------------------------------------------------------- outer wheel
-void outer_run ()  { digitalWrite (OUTER_CONTROL, HIGH); }
-void outer_stop () { digitalWrite (OUTER_CONTROL, LOW); }
+// Control lines to the motor board: Timer2 toggles a line at 1 kHz while its
+// wheel should turn and holds it LOW otherwise (see the header note).
+volatile bool outer_on = false, inner_on = false;
+ISR (TIMER2_COMPA_vect) {
+  if (outer_on) PINB = _BV (PB1); else PORTB &= ~_BV (PB1);
+  if (inner_on) PINB = _BV (PB0); else PORTB &= ~_BV (PB0);
+}
+void outer_run ()  { outer_on = true; }
+void outer_stop () { outer_on = false; }
+void inner_run ()  { inner_on = true; }
+void inner_stop () { inner_on = false; }
 unsigned long tooth_ms () { return lap_ms / OUTER_TEETH; }
 bool zero_now () { return digitalRead (IR_OUTER_0) == HIGH; }
 bool outer_moving () { return outer_state != OUT_STOPPED && outer_state != OUT_FAULT; }
@@ -282,6 +293,7 @@ void outer_nudge (unsigned long now) {
 void outer_fault (const __FlashStringHelper* why) {
   outer_stop ();
   outer_state = OUT_FAULT;
+  inner_state = IN_STOPPED;                     // do not leave the inner wheel turning on its own
   Serial.print (F("ERROR outer wheel ")); Serial.print (why); Serial.println (F(" - motor stopped (select to retry)"));
 }
 // Non-blocking, every loop pass.
@@ -346,14 +358,14 @@ void drive_outer (unsigned long now) {
 void drive_inner () {
   bool tooth = digitalRead (IR_INNER_COUNTER) == HIGH;
   switch (inner_state) {
-    case IN_SPIN:    digitalWrite (INNER_CONTROL, HIGH); break;
-    case IN_STOPPED: digitalWrite (INNER_CONTROL, LOW);  break;
+    case IN_SPIN:    inner_run (); break;
+    case IN_STOPPED: inner_stop ();  break;
     case IN_SNAP:
-      digitalWrite (INNER_CONTROL, tooth ? LOW : HIGH);
+      inner_on = !tooth;
       if (tooth) { inner_state = IN_STOPPED; Serial.println (F("inner: stopped")); }
       break;
     case IN_NUDGE:
-      digitalWrite (INNER_CONTROL, HIGH);
+      inner_run ();
       if (!tooth) inner_state = IN_SNAP;
       break;
   }
@@ -373,18 +385,18 @@ void count_inner (unsigned long now) {
 // Blocking homing of BOTH wheels (same as the original reset_the_wheels).
 void home_wheels () {
   digitalWrite (STEPPER_O_ENABLE, LOW); digitalWrite (STEPPER_I_ENABLE, LOW);
-  outer_stop (); digitalWrite (INNER_CONTROL, LOW);
+  outer_stop (); inner_stop ();
   delay (500);
   Serial.println (F(" reset wheels"));
   unsigned long t0 = millis ();
   while (true) {
     bool oz = zero_now (), iz = digitalRead (IR_INNER_0) == HIGH;
-    digitalWrite (OUTER_CONTROL, oz ? LOW : HIGH);
-    digitalWrite (INNER_CONTROL, iz ? LOW : HIGH);
+    outer_on = !oz;
+    inner_on = !iz;
     if (oz && iz) break;
     if (millis () - t0 > SEEK_TIMEOUT_MS) { Serial.println (F("ERROR homing timed out")); break; }
   }
-  outer_stop (); digitalWrite (INNER_CONTROL, LOW);
+  outer_stop (); inner_stop ();
   outer_pos = 0; report_outer (1);
   inner_counter = 1; Serial.println (F("inner counter = 1"));
   prev_inner_counter_state = digitalRead (IR_INNER_COUNTER);
@@ -487,7 +499,7 @@ void handle_choose () {
   bool right = both_stopped && outer_pos == SYMBOLS[st.answer].pos && inner_counter == st.inner;
   Serial.print (F("choose outer=")); Serial.print (outer_pos); Serial.print (F(" inner=")); Serial.print (inner_counter);
   Serial.println (right ? F(" -> CORRECT") : (both_stopped ? F(" -> wrong") : F(" -> wrong (a wheel is still moving)")));
-  outer_stop (); digitalWrite (INNER_CONTROL, LOW);
+  outer_stop (); inner_stop ();
   if (right) {
     digitalWrite (st.house, HIGH);              // 2 s pulse -> bridge -> MQTT SunDial/<Symbol> true
     all_leds (0, 255, 0);
@@ -508,7 +520,7 @@ void handle_choose () {
 void finish_game () {
   Serial.println (F("SOLVED - all symbols"));
   phase = PH_DONE;
-  outer_stop (); digitalWrite (INNER_CONTROL, LOW);
+  outer_stop (); inner_stop ();
   for (int i = 0; i < 5; i++) { all_leds (0, 255, 0); delay (150); all_leds (0, 0, 0); delay (150); }
   all_leds (0, 255, 0);
   delay (5000);
@@ -546,7 +558,8 @@ void setup () {
   pinMode (IR_OUTER_0, INPUT); pinMode (IR_INNER_0, INPUT); pinMode (IR_INNER_COUNTER, INPUT);
   pinMode (STEPPER_O_ENABLE, OUTPUT); pinMode (STEPPER_I_ENABLE, OUTPUT);
   pinMode (OUTER_CONTROL, OUTPUT); outer_stop ();
-  pinMode (INNER_CONTROL, OUTPUT); digitalWrite (INNER_CONTROL, LOW);
+  pinMode (INNER_CONTROL, OUTPUT); inner_stop ();
+  TCCR2A = _BV (WGM21); TCCR2B = _BV (CS22); OCR2A = 249; TIMSK2 = _BV (OCIE2A);   // Timer2: 1 kHz tick for the control lines
   pinMode (CHOOSE, INPUT_PULLUP);
   for (int p = 2; p <= 7; p++) { if (p == OUTER_BUTTON_PIN || p == INNER_BUTTON_PIN) continue; pinMode (p, OUTPUT); digitalWrite (p, LOW); }
 #if !OUTER_BUTTON_ANALOG
@@ -595,7 +608,7 @@ void loop () {
       drive_inner ();
       paint_play (now);
       if (outer_state == OUT_SPIN || outer_state == OUT_STOPPED) { phase = PH_PLAY; Serial.println (F("play")); }
-      if (outer_state == OUT_FAULT && choose_edge) { Serial.println (F("select -> retry")); cal_edge_ms = 0; seek_started_ms = now; outer_state = OUT_SEEK_LEAVE; }
+      if (outer_state == OUT_FAULT && choose_edge) { Serial.println (F("select -> retry")); cal_edge_ms = 0; seek_started_ms = now; outer_state = OUT_SEEK_LEAVE; inner_state = IN_SPIN; }
       break;
 
     case PH_PLAY:
