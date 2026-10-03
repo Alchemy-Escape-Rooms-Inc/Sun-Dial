@@ -519,3 +519,10 @@ STATE FOR NEXT SESSION:
 [2026-09-27 16:05] Motor Arduino (Nano, CH340 COM9, silent old sketch) FLASHED SunDial_Motor v2.0.0 (2394 B); boot line 'SunDial motor v2.0.0 (independent step timers)'. Remaining: bridge 4.6.0 (native USB), SunDialSky (board not built).
 [2026-09-27 16:15] Bridge FLASHED 4.6.0 via native USB COM21 (VID_303A). MQTT verify: ONLINE, heartbeats, STATUS:RUNNING:...:VER4.6.0:OUTER-1:INNER-1:IP:10.1.10.200:OTA:3232, RSSI -43. Wireless OTA proof attempted right after (see next line).
 [2026-09-27 16:20] OTA PROVEN on the bridge: arduino-cli upload --protocol network -p 10.1.10.200 (PBKDF2 auth OK, 100% Done), board rebooted, STATUS VER4.6.0 IP:10.1.10.200 OTA:3232. Retained /status came back OFFLINE (LWT race, known) -> re-planted ONLINE retained. Bridge never needs the cable again. Remaining: SunDialSky board + 6 videos; prop verify of SpinStop.
+[2026-10-03 16:36] User: "sundial just spins endlessly". NO CODE CHANGED. Evidence from the wire log (watchtower-v2/logs/mqtt_2026-10-02_170514.txt) + live STATUS:
+  - Bridge 4.6.0 alive (STATUS ...VER4.6.0:OUTER-1:INNER-1:IP:10.1.10.199 - DHCP moved it off .200), rebooted 16:33:00 (prop power cycle).
+  - ~150,000 random SunDial/<Symbol> = true in 24 h (about 2 per second, all five symbols, around the clock since at least 10-02 17:05). A live controller holds D2-D6 LOW, so nothing is driving the HOUSE lines.
+  - Zero /nano, /Outer, /Inner lines; Clue never left 0 (no "step=1") -> no serial from the controller either.
+  - No Nano on this PC's USB.
+  => controller Nano is not driving its pins (dead / not seated / carrier ground or power lost). Motor sketch (old AND v2.0.0) has INPUT_PULLUP on both control lines, so a silent controller = both wheels run forever. Same symptom as 09-12 (D8 not reaching the motor board).
+  PROPOSED, not built: (1) motor + controller fail-safe = control lines active-LOW so a missing controller means wheels stand still (needs BOTH Nanos reflashed together on USB); (2) bridge: longer HOUSE confirm so floating lines cannot publish fake "true" (OTA, no cable). Waiting on owner's physical check of the controller Nano.
