@@ -58,15 +58,15 @@ Clue 0 (reset) is just `0xFC 0`, a hard cut back to the plain sky.
   rigging never crosses the letters. Two lines max.
 - Fades: 2 s linear opacity. Nothing else animates.
 
-## Words (owner's call, these are the built-in suggestions)
+## Words (2026-10-07 riddle set, matches SpinStop v3.3.0 STEPS; four lines each, upper-left cloud band)
 
 | Question | Clue in the clouds |
 |---|---|
-| 1 bottle | Count what the sea washed up |
-| 2 trident | One belongs to the sea king |
-| 3 coconut+crab -> turtle | Three wear their homes on their backs |
-| 4 lighthouse+anchor -> coconut | Land ahoy, drop anchor, what grows here? |
-| 5 shark+trident+bottle -> skull | Three ways a pirate meets his end |
+| 1 lighthouse -> bottle (3) | Like the light, I send word across the water. A neck but no head. A mouth but no voice. |
+| 2 crab+seahorse -> turtle (7) | Born beneath the sand. Raised beneath the waves. I never leave home, yet I am never home. |
+| 3 lighthouse+anchor -> coconut (9) | Three eyes, yet blind. A beard, yet no face. I wait up high, then fall without warning. |
+| 4 shark+crab -> skull (4) | I once held every secret a pirate knew. Now I am empty, and I cannot stop grinning. |
+| 5 shark+seahorse -> trident (1) | Three teeth, but I have never tasted a thing. The one who holds me rules all that swim. |
 | solved | The sun has spoken |
 
 ## Prompts

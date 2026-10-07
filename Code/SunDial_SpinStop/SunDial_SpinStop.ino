@@ -1,4 +1,4 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.2.0  (2026-10-03)
+//  SunDial_SpinStop  -  controller Nano firmware v3.3.0  (2026-10-07)
 //
 //  THE GAME ("spin and stop"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, then BOTH
@@ -14,9 +14,10 @@
 //       twinkle, then the next step's clues pulse and both wheels spin again.
 //       Wrong (either wheel off, or a wheel still spinning) = red 2 s + HOUSE_6
 //       (SunDial/Wrong), then both wheels spin again.
-//    4. Five steps: two plain (the clue IS the symbol), two with a pair of clues
-//       and one with three clues, where the answer is what the clues point at
-//       (see STEPS). Each step also prints "step=N ..." which the bridge turns
+//    4. Five steps, all riddles: the pulsing clue light(s) give one half and
+//       the words in the clouds (TV next door) give the other; the answer is
+//       never one of the lit clues, and no clue is an already-solved symbol
+//       (solved lights stay green and cannot pulse) (see STEPS). Each step also prints "step=N ..." which the bridge turns
 //       into MermaidsTale/SunDial/Clue = N for the sky-writing video next door. All five answers are the five countable things in
 //       the jungle, so the bridge/M3 wiring is unchanged: HOUSE_1..5 = five
 //       symbols, HOUSE_6 = wrong.
@@ -58,7 +59,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.2.0"
+#define FW_VERSION "3.3.0"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -140,11 +141,11 @@ const Symbol SYMBOLS[NUM_SYMBOLS] = {
 #define MAX_CLUES 3
 struct Step { uint8_t nclues; uint8_t clues[MAX_CLUES]; uint8_t answer; uint8_t inner; uint8_t house; };
 const Step STEPS[] = {
-  { 1, { S_BOTTLE,     0,          0          }, S_BOTTLE,  3, HOUSE_1 },   // plain
-  { 1, { S_TRIDENT,    0,          0          }, S_TRIDENT, 1, HOUSE_5 },   // plain
-  { 2, { S_COCONUT,    S_CRAB,     0          }, S_TURTLE,  7, HOUSE_3 },   // hard shells: what's the third?
-  { 2, { S_LIGHTHOUSE, S_ANCHOR,   0          }, S_COCONUT, 9, HOUSE_4 },   // land ahoy, drop anchor: what's on the island?
-  { 3, { S_SHARK,      S_TRIDENT,  S_BOTTLE   }, S_SKULL,   4, HOUSE_2 },   // three ways a pirate dies: eaten, speared, rum
+  { 1, { S_LIGHTHOUSE, 0,          0          }, S_BOTTLE,  3, HOUSE_1 },   // sends word across the water; neck no head, mouth no voice
+  { 2, { S_CRAB,       S_SEAHORSE, 0          }, S_TURTLE,  7, HOUSE_3 },   // born under sand, raised under waves, never leaves home
+  { 2, { S_LIGHTHOUSE, S_ANCHOR,   0          }, S_COCONUT, 9, HOUSE_4 },   // three eyes, a beard, waits up high then falls
+  { 2, { S_SHARK,      S_CRAB,     0          }, S_SKULL,   4, HOUSE_2 },   // held a pirate's secrets, now empty and grinning
+  { 2, { S_SHARK,      S_SEAHORSE, 0          }, S_TRIDENT, 1, HOUSE_5 },   // three teeth, never tasted; its holder rules all that swim
 };
 const int NUM_STEPS = sizeof (STEPS) / sizeof (STEPS[0]);
 
