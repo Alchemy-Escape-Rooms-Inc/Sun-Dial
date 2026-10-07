@@ -1,4 +1,4 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.3.0  (2026-10-07)
+//  SunDial_SpinStop  -  controller Nano firmware v3.3.1  (2026-10-07)
 //
 //  THE GAME ("spin and stop"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, then BOTH
@@ -59,7 +59,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.3.0"
+#define FW_VERSION "3.3.1"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -124,16 +124,16 @@
 enum Sym { S_BOTTLE, S_TRIDENT, S_SKULL, S_COCONUT, S_TURTLE, S_LIGHTHOUSE, S_SHARK, S_CRAB, S_SEAHORSE, S_ANCHOR, NUM_SYMBOLS };
 struct Symbol { const char* name; uint8_t pos; uint8_t led_board; uint8_t led; };
 const Symbol SYMBOLS[NUM_SYMBOLS] = {
-  { "bottle",     2, 0, 1 },   // known (old code: board 0 addr 4)
-  { "trident",    9, 1, 3 },   // known (board 1 addr 10)
-  { "skull",      5, 0, 2 },   // known (board 0 addr 7, wire name "Crab")
-  { "coconut",    8, 1, 2 },   // known (board 1 addr 7)
-  { "turtle",     6, 1, 0 },   // known (board 1 addr 1)
-  { "lighthouse", 0, 0, 0 },   // MAP
-  { "shark",      0, 0, 3 },   // MAP
-  { "crab",       0, 0, 4 },   // MAP
-  { "seahorse",   0, 1, 1 },   // MAP
-  { "anchor",     0, 1, 4 },   // MAP
+  { "bottle",     2, 0, 1 },   // light map read off the prop in MAP MODE 2026-10-07:
+  { "trident",    9, 1, 3 },   //   board 0 led 0..4 = seahorse, bottle, crab, skull, shark
+  { "skull",      5, 0, 3 },   //   board 1 led 0..4 = turtle, lighthouse, coconut, trident, anchor
+  { "coconut",    8, 1, 2 },   // (skull was 0/2 in the old code; the owner reads 0/2 as the crab, 0/3 as the skull)
+  { "turtle",     6, 1, 0 },
+  { "lighthouse", 0, 1, 1 },
+  { "shark",      0, 0, 4 },
+  { "crab",       0, 0, 2 },
+  { "seahorse",   0, 0, 0 },
+  { "anchor",     0, 1, 4 },
 };
 
 // The five steps. clues = symbols whose lights pulse; answer = symbol the
