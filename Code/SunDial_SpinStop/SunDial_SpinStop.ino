@@ -1,26 +1,29 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.3.1  (2026-10-07)
+//  SunDial_SpinStop  -  controller Nano firmware v3.4.0  (2026-10-07)
 //
-//  THE GAME ("spin and stop"):
-//    1. Select (or the bridge trigger) starts a game: the dial homes, then BOTH
-//       wheels spin on their own and the clue light(s) for step 1 pulse gold.
-//    2. Players work out which symbol the clues point at and how many of that
-//       thing are in the jungle. They STOP the outer wheel on the symbol with
-//       the outer button and the inner wheel on the number with the inner
-//       button (each press stops that wheel at its next stop; a press while
-//       stopped nudges it ONE stop forward). The symbol the outer is resting on
-//       lights white so they can see what they picked.
-//    3. CHOOSE. Right = every light green 2 s, that symbol stays green, HOUSE
-//       pulse to the bridge (MQTT SunDial/<Symbol> = true for M3 + Evalee),
-//       twinkle, then the next step's clues pulse and both wheels spin again.
-//       Wrong (either wheel off, or a wheel still spinning) = red 2 s + HOUSE_6
-//       (SunDial/Wrong), then both wheels spin again.
+//  THE GAME (owner's flow, 2026-10-07 - "show spin, then the players dial"):
+//    1. Select (or the bridge trigger) starts a game: the dial homes, the outer
+//       wheel makes one show lap on its own and stops, the inner ring returns
+//       to 1, and only then the clue light(s) for step 1 pulse gold.
+//    2. Nothing moves by itself during play. Players work out which symbol the
+//       clues point at and how many of that thing are in the jungle, then turn
+//       the OUTER wheel to the symbol with the outer button and the INNER ring
+//       to the number with the inner button: one press = one stop forward,
+//       hold = keeps stepping. Only one wheel moves at a time. The symbol the
+//       outer is resting on lights white so they can see what they picked.
+//    3. CHOOSE (ignored while a wheel is moving). Right = every light green
+//       2 s, that symbol stays green, HOUSE pulse to the bridge (MQTT
+//       SunDial/<Symbol> = true for M3 + Evalee), twinkle, the outer makes its
+//       show lap again, the inner returns to 1, then the next step's clues
+//       pulse. Wrong = red 2 s + HOUSE_6 (SunDial/Wrong); the wheels stay
+//       where the players left them.
 //    4. Five steps, all riddles: the pulsing clue light(s) give one half and
 //       the words in the clouds (TV next door) give the other; the answer is
 //       never one of the lit clues, and no clue is an already-solved symbol
-//       (solved lights stay green and cannot pulse) (see STEPS). Each step also prints "step=N ..." which the bridge turns
-//       into MermaidsTale/SunDial/Clue = N for the sky-writing video next door. All five answers are the five countable things in
-//       the jungle, so the bridge/M3 wiring is unchanged: HOUSE_1..5 = five
-//       symbols, HOUSE_6 = wrong.
+//       (solved lights stay green and cannot pulse) (see STEPS). Each step
+//       prints "step=N ..." AFTER its show lap, which the bridge turns into
+//       MermaidsTale/SunDial/Clue = N for the sky-writing video. All five
+//       answers are the five countable things in the jungle, so the bridge/M3
+//       wiring is unchanged: HOUSE_1..5 = five symbols, HOUSE_6 = wrong.
 //    5. After the fifth: green celebration, wheels home, attract light show
 //       until the next select.
 //
@@ -38,9 +41,9 @@
 //      forever. An older motor sketch would read the square wave as stutter.
 //
 //  POSITION: the outer tooth sensor is dead, so the outer position is kept by
-//  TIME from the home-mark edge (one lap measured at every game start unless
-//  OUTER_LAP_MS is baked in; one stop = lap / OUTER_TEETH). Every home-mark
-//  edge re-syncs to position 1. The inner ring still has its tooth sensor and
+//  TIME from the home-mark edge (one lap measured on the show lap unless
+//  OUTER_LAP_MS is baked in; one stop = lap / OUTER_TEETH). Every show lap
+//  ends ON the home mark, so every step starts re-synced at position 1. The inner ring still has its tooth sensor and
 //  snaps to a number exactly as before.
 //
 //  LIGHT MAP: each symbol's etched light is one RGB LED on the two PCA9685
@@ -59,7 +62,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.3.1"
+#define FW_VERSION "3.4.0"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -108,10 +111,11 @@
 
 // ---------------------------------------------------------------- tuning
 #define OUTER_TEETH            10      // symbol stops on the outer ring
-#define OUTER_LAP_MS           0       // 0 = measure at every game start; or bake in the "outer lap = N ms" serial value
+#define OUTER_LAP_MS           0       // 0 = measure on the show lap; or bake in the "outer lap = N ms" serial value
 #define OUTER_PARK_OFFSET_MS   0       // + stops a little later after each stop boundary (tune if symbols sit off-centre)
 #define BUTTON_DEBOUNCE_MS     30
-#define SEEK_TIMEOUT_MS        90000UL // homing / lap measure longer than this stops the motor (select retries)
+#define SEEK_TIMEOUT_MS        90000UL // homing / show lap longer than this stops the motor (select retries)
+#define MARK_SETTLE_MS         40      // ignore home-mark chatter this long after an edge
 #define PULSE_PERIOD_MS        1400    // breathing period of the clue lights
 #define ATTRACT_STEP_MS        600
 #define TWINKLE_MS             1500
@@ -154,23 +158,20 @@ const int LEDS_PER_BOARD = 5;
 Adafruit_PWMServoDriver pwmBoard[] = { Adafruit_PWMServoDriver (0x40), Adafruit_PWMServoDriver (0x41) };
 
 // ---------------------------------------------------------------- state
-enum Phase { PH_ATTRACT, PH_HOMING, PH_PLAY, PH_DONE };
+enum Phase { PH_ATTRACT, PH_PLAY, PH_DONE };
 Phase phase = PH_ATTRACT;
 
 // outer wheel: timed position
-enum OuterState { OUT_SPIN, OUT_STOPPING, OUT_STOPPED, OUT_NUDGE, OUT_SEEK_LEAVE, OUT_SEEK_ZERO, OUT_FAULT };
+enum OuterState { OUT_STOPPED, OUT_NUDGE, OUT_FAULT };
 OuterState outer_state = OUT_STOPPED;
 int  outer_pos = 1;                 // believed outer position 1..OUTER_TEETH (last reported)
 unsigned long lap_ms = OUTER_LAP_MS;
-unsigned long spin_zero_ms = 0;     // time of the (real or virtual) home-mark edge the spin is timed from
-unsigned long stop_at_ms = 0;       // OUT_STOPPING / OUT_NUDGE: stop when now >= this
+unsigned long stop_at_ms = 0;       // OUT_NUDGE: stop when now >= this
 int  stop_pos = 1;                  // position we will be on when stop_at_ms passes
-unsigned long seek_started_ms = 0, cal_edge_ms = 0;
 bool zero_prev = false;
-bool outer_press_pending = false;   // pressed during lap measure: stop at the first stop after it
 
 // inner wheel
-enum InnerState { IN_SPIN, IN_SNAP, IN_STOPPED, IN_NUDGE };
+enum InnerState { IN_SNAP, IN_STOPPED, IN_NUDGE };
 InnerState inner_state = IN_STOPPED;
 int  inner_counter = 1;
 int  prev_inner_counter_state = 0;
@@ -263,31 +264,10 @@ bool outer_moving () { return outer_state != OUT_STOPPED && outer_state != OUT_F
 void report_outer (int pos) {
   if (pos != outer_pos) { outer_pos = pos; Serial.print (F("outer counter = ")); Serial.println (outer_pos); }
 }
-// position the timed model says we are at right now (while spinning)
-int outer_pos_now (unsigned long now) {
-  if (lap_ms == 0) return outer_pos;
-  return (int)(((now - spin_zero_ms) / tooth_ms ()) % OUTER_TEETH) + 1;
-}
-void outer_begin_spin (unsigned long now) {
-  // continue the timed model from the known stop: pretend the mark passed (pos-1) stops ago
-  spin_zero_ms = now - (unsigned long)(outer_pos - 1) * tooth_ms ();
-  outer_state = OUT_SPIN;
-  outer_run ();
-}
-// player pressed while spinning: stop at the next stop boundary
-void outer_request_stop (unsigned long now) {
-  if (lap_ms == 0) { outer_press_pending = true; return; }          // lap not measured yet: stop at the mark
-  unsigned long el = now - spin_zero_ms;
-  unsigned long k = el / tooth_ms () + 1;                            // next boundary index after the mark
-  stop_at_ms = spin_zero_ms + k * tooth_ms () + OUTER_PARK_OFFSET_MS;
-  stop_pos = (int)(k % OUTER_TEETH) + 1;
-  outer_state = OUT_STOPPING;
-}
-// player pressed while stopped: one stop forward
+// player pressed (or is holding) while stopped: one stop forward
 void outer_nudge (unsigned long now) {
   stop_at_ms = now + tooth_ms () + OUTER_PARK_OFFSET_MS;
   stop_pos = outer_pos % OUTER_TEETH + 1;
-  spin_zero_ms = now - (unsigned long)(outer_pos - 1) * tooth_ms ();
   outer_state = OUT_NUDGE;
   outer_run ();
 }
@@ -309,38 +289,11 @@ void drive_outer (unsigned long now) {
       outer_stop ();
       break;
 
-    case OUT_SEEK_LEAVE:                        // lap measure: drive off the mark first
-      outer_run ();
-      if (!zero) outer_state = OUT_SEEK_ZERO;
-      else if (now - seek_started_ms > SEEK_TIMEOUT_MS) outer_fault (F("never left the home mark"));
-      break;
-
-    case OUT_SEEK_ZERO:                         // lap measure: two mark edges one lap apart
-      outer_run ();
-      if (zero_edge) {
-        if (cal_edge_ms == 0) { cal_edge_ms = now; Serial.println (F("outer: measuring one lap")); }
-        else {
-          lap_ms = now - cal_edge_ms; cal_edge_ms = 0;
-          Serial.print (F("outer lap = ")); Serial.print (lap_ms); Serial.println (F(" ms  (bake into OUTER_LAP_MS)"));
-          spin_zero_ms = now; report_outer (1);
-          outer_state = OUT_SPIN;               // keep spinning: play has begun
-          if (outer_press_pending) { outer_press_pending = false; outer_stop (); outer_state = OUT_STOPPED; Serial.println (F("outer: stopped on 1 (press during lap measure)")); }
-        }
-      } else if (now - seek_started_ms > SEEK_TIMEOUT_MS) outer_fault (F("never saw the home mark"));
-      break;
-
-    case OUT_SPIN:
-      outer_run ();
-      if (zero_edge) { spin_zero_ms = now; report_outer (1); }
-      else report_outer (outer_pos_now (now));
-      break;
-
-    case OUT_STOPPING:
     case OUT_NUDGE:
       outer_run ();
       if (zero_edge) {                          // the mark itself is stop 1: land there, re-synced
         if (OUTER_PARK_OFFSET_MS > 0) delay (OUTER_PARK_OFFSET_MS);
-        outer_stop (); outer_state = OUT_STOPPED; spin_zero_ms = now;
+        outer_stop (); outer_state = OUT_STOPPED;
         report_outer (1);
         Serial.println (F("outer: stopped"));
       } else if ((long)(now - stop_at_ms) >= 0) {
@@ -353,13 +306,12 @@ void drive_outer (unsigned long now) {
 }
 
 // ---------------------------------------------------------------- inner wheel
-// IN_SPIN: motor runs. IN_SNAP: stop at the next tooth (control LOW while a
+// IN_SNAP: stop at the next tooth (control LOW while a
 // tooth is in the beam, HIGH otherwise - the original snap rule). IN_NUDGE:
 // run off the current tooth, then snap to the next one.
 void drive_inner () {
   bool tooth = digitalRead (IR_INNER_COUNTER) == HIGH;
   switch (inner_state) {
-    case IN_SPIN:    inner_run (); break;
     case IN_STOPPED: inner_stop ();  break;
     case IN_SNAP:
       inner_on = !tooth;
@@ -383,26 +335,69 @@ void count_inner (unsigned long now) {
   prev_inner_counter_state = st;
 }
 
-// Blocking homing of BOTH wheels (same as the original reset_the_wheels).
+// Blocking homing, one wheel at a time (outer to its mark, then inner to 1).
+void home_inner () {
+  unsigned long t0 = millis ();
+  while (digitalRead (IR_INNER_0) != HIGH) {
+    inner_on = true;
+    if (millis () - t0 > SEEK_TIMEOUT_MS) { Serial.println (F("ERROR inner homing timed out")); break; }
+  }
+  inner_stop ();
+  inner_counter = 1; Serial.println (F("inner counter = 1"));
+  prev_inner_counter_state = digitalRead (IR_INNER_COUNTER);
+  inner_state = IN_STOPPED;
+}
 void home_wheels () {
   digitalWrite (STEPPER_O_ENABLE, LOW); digitalWrite (STEPPER_I_ENABLE, LOW);
   outer_stop (); inner_stop ();
   delay (500);
   Serial.println (F(" reset wheels"));
   unsigned long t0 = millis ();
-  while (true) {
-    bool oz = zero_now (), iz = digitalRead (IR_INNER_0) == HIGH;
-    outer_on = !oz;
-    inner_on = !iz;
-    if (oz && iz) break;
+  while (!zero_now ()) {
+    outer_on = true;
     if (millis () - t0 > SEEK_TIMEOUT_MS) { Serial.println (F("ERROR homing timed out")); break; }
   }
-  outer_stop (); inner_stop ();
+  outer_stop ();
   outer_pos = 0; report_outer (1);
-  inner_counter = 1; Serial.println (F("inner counter = 1"));
-  prev_inner_counter_state = digitalRead (IR_INNER_COUNTER);
   zero_prev = zero_now ();
-  outer_state = OUT_STOPPED; inner_state = IN_STOPPED;
+  outer_state = OUT_STOPPED;
+  home_inner ();
+}
+
+// Blocking wait for the outer home mark to read `want`; false = timed out.
+bool wait_mark (bool want, unsigned long t0) {
+  while (zero_now () != want) if (millis () - t0 > SEEK_TIMEOUT_MS) return false;
+  delay (MARK_SETTLE_MS);
+  return true;
+}
+// The show lap before every clue: the outer wheel turns on its own and stops
+// ON the home mark (position 1), then the inner ring returns to 1. From the
+// mark it is exactly one lap (and the lap time is measured); from an answer
+// it runs on to the mark, plus one more lap if that was under half a turn.
+// Returns false on a fault (outer_state = OUT_FAULT, select retries).
+bool show_spin () {
+  Serial.println (F("show spin"));
+  repaint_all ();
+  bool from_mark = zero_now ();
+  unsigned long t0 = millis ();
+  outer_run ();
+  if (!wait_mark (false, t0)) { outer_fault (F("never left the home mark")); return false; }
+  if (!wait_mark (true, t0))  { outer_fault (F("never saw the home mark")); return false; }
+  unsigned long edge = millis () - MARK_SETTLE_MS;
+  if (from_mark) lap_ms = edge - t0;
+  else if (lap_ms == 0 || edge - t0 < lap_ms / 2) {       // too short to read as a spin: one more full lap
+    if (!wait_mark (false, edge)) { outer_fault (F("never left the home mark")); return false; }
+    if (!wait_mark (true, edge))  { outer_fault (F("never saw the home mark")); return false; }
+    lap_ms = millis () - MARK_SETTLE_MS - edge;
+  }
+  outer_stop ();
+  if (OUTER_LAP_MS) lap_ms = OUTER_LAP_MS;
+  Serial.print (F("outer lap = ")); Serial.print (lap_ms); Serial.println (F(" ms  (bake into OUTER_LAP_MS)"));
+  outer_pos = 0; report_outer (1);
+  zero_prev = zero_now ();
+  outer_state = OUT_STOPPED;
+  home_inner ();
+  return true;
 }
 
 // ---------------------------------------------------------------- inputs
@@ -464,10 +459,10 @@ void announce_step () {
   Serial.print (F(" target_outer=")); Serial.print (SYMBOLS[st.answer].pos);
   Serial.print (F(" need_inner=")); Serial.println (st.inner);
 }
-void spin_both (unsigned long now) {
-  outer_begin_spin (now);
-  inner_state = IN_SPIN;
-  Serial.println (F("wheels spinning"));
+// show lap, then the clue: at game start, for every next step and on a select-retry after a fault
+void begin_step () {
+  if (!show_spin ()) return;
+  announce_step ();
 }
 void start_game () {
   for (int s = 0; s < NUM_SYMBOLS; s++) solved_sym[s] = false;
@@ -476,31 +471,20 @@ void start_game () {
   all_leds (0, 0, 0);
   home_wheels ();
   Serial.println (F("game start"));
-  announce_step ();
-  phase = PH_HOMING;
-  if (OUTER_LAP_MS == 0 && lap_ms == 0) {         // measure the lap while the wheels start spinning
-    inner_state = IN_SPIN;
-    outer_press_pending = false; cal_edge_ms = 0; seek_started_ms = millis ();
-    outer_state = OUT_SEEK_LEAVE;
-  } else {
-    spin_both (millis ());
-    phase = PH_PLAY;
-  }
+  phase = PH_PLAY;
+  begin_step ();
 }
 void next_step () {
   current_step++;
   if (current_step >= NUM_STEPS) { finish_game (); return; }
   twinkle (TWINKLE_MS);
-  announce_step ();
-  spin_both (millis ());
+  begin_step ();
 }
 void handle_choose () {
   const Step& st = STEPS[current_step];
-  bool both_stopped = (outer_state == OUT_STOPPED && inner_state == IN_STOPPED);
-  bool right = both_stopped && outer_pos == SYMBOLS[st.answer].pos && inner_counter == st.inner;
+  bool right = outer_pos == SYMBOLS[st.answer].pos && inner_counter == st.inner;
   Serial.print (F("choose outer=")); Serial.print (outer_pos); Serial.print (F(" inner=")); Serial.print (inner_counter);
-  Serial.println (right ? F(" -> CORRECT") : (both_stopped ? F(" -> wrong") : F(" -> wrong (a wheel is still moving)")));
-  outer_stop (); inner_stop ();
+  Serial.println (right ? F(" -> CORRECT") : F(" -> wrong"));
   if (right) {
     digitalWrite (st.house, HIGH);              // 2 s pulse -> bridge -> MQTT SunDial/<Symbol> true
     all_leds (0, 255, 0);
@@ -513,9 +497,7 @@ void handle_choose () {
     all_leds (255, 0, 0);
     delay (FEEDBACK_MS);
     if (INNER_BUTTON_PIN != HOUSE_6 && OUTER_BUTTON_PIN != HOUSE_6) digitalWrite (HOUSE_6, LOW);
-    repaint_all ();
-    if (outer_state == OUT_FAULT) return;
-    spin_both (millis ());                      // both wheels go again
+    repaint_all ();                             // wheels stay where the players left them
   }
 }
 void finish_game () {
@@ -602,33 +584,20 @@ void loop () {
       if (choose_edge) start_game ();
       break;
 
-    case PH_HOMING:                              // wheels spinning, lap being measured
-      if (btn_outer.edge) outer_request_stop (now);
-      if (btn_inner.edge && inner_state == IN_SPIN) inner_state = IN_SNAP;
-      drive_outer (now);
-      drive_inner ();
-      paint_play (now);
-      if (outer_state == OUT_SPIN || outer_state == OUT_STOPPED) { phase = PH_PLAY; Serial.println (F("play")); }
-      if (outer_state == OUT_FAULT && choose_edge) { Serial.println (F("select -> retry")); cal_edge_ms = 0; seek_started_ms = now; outer_state = OUT_SEEK_LEAVE; inner_state = IN_SPIN; }
-      break;
-
-    case PH_PLAY:
-      if (btn_outer.edge) {
-        if (outer_state == OUT_SPIN) outer_request_stop (now);
-        else if (outer_state == OUT_STOPPED) outer_nudge (now);
-      }
-      if (btn_inner.edge) {
-        if (inner_state == IN_SPIN) inner_state = IN_SNAP;
-        else if (inner_state == IN_STOPPED) inner_state = IN_NUDGE;
-      }
+    case PH_PLAY: {
+      bool idle = (outer_state == OUT_STOPPED && inner_state == IN_STOPPED);   // one wheel at a time
+      if (idle && (btn_outer.edge || btn_outer.state)) outer_nudge (now);       // press = one stop, hold = keep stepping
+      else if (idle && (btn_inner.edge || btn_inner.state)) inner_state = IN_NUDGE;
       drive_outer (now);
       drive_inner ();
       paint_play (now);
       if (choose_edge) {
-        if (outer_state == OUT_FAULT) { Serial.println (F("select -> retry (re-home)")); home_wheels (); spin_both (millis ()); }
-        else handle_choose ();
+        if (outer_state == OUT_FAULT) { Serial.println (F("select -> retry (re-home)")); home_wheels (); begin_step (); }
+        else if (idle) handle_choose ();
+        else Serial.println (F("choose ignored (a wheel is moving)"));
       }
       break;
+    }
 
     case PH_DONE:
       break;
