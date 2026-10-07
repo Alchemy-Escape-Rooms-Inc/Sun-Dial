@@ -1,4 +1,4 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.4.0  (2026-10-07)
+//  SunDial_SpinStop  -  controller Nano firmware v3.4.1  (2026-10-07)
 //
 //  THE GAME (owner's flow, 2026-10-07 - "show spin, then the players dial"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, the outer
@@ -62,7 +62,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.4.0"
+#define FW_VERSION "3.4.1"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -87,7 +87,8 @@
 // Button between the pin and GND, internal pull-up, pressed = LOW. If a pad
 // has a pull-down resistor on the carrier (the old A3 sensor pad did), wire
 // that button between the pin and +5 V instead and set its ACTIVE_LOW to 0.
-// The boot log says "reads PRESSED at boot" when the polarity is wrong.
+// Since v3.4.1 the polarity is taken from the resting level at power-up (blue
+// flash = outer flipped, purple flash = inner flipped), the defines are only the default.
 // A6/A7 (analog-only, need an external 10k pull-up) still work: set *_ANALOG 1.
 #ifndef OUTER_BUTTON_PIN
 #define OUTER_BUTTON_PIN     A3
@@ -183,6 +184,10 @@ bool solved_sym[NUM_SYMBOLS];
 // buttons
 struct Button { bool state, prev, raw_prev, edge; unsigned long raw_since; };
 Button btn_outer, btn_inner;
+// Whatever level a button pin rests at when the board powers up is taken as
+// "not pressed" (nobody holds a wheel button at power-up), so a pad with a
+// pull-down or a button wired to +5 V cannot read as held and run a wheel forever.
+bool outer_active_low = OUTER_BUTTON_ACTIVE_LOW, inner_active_low = INNER_BUTTON_ACTIVE_LOW;
 bool choose_prev = false, choose_edge = false;
 bool trigger_pending = false;
 unsigned long attract_ms = 0;
@@ -412,8 +417,8 @@ void debounce (Button& b, bool raw, unsigned long now) {
   b.edge = b.state && !b.prev;
 }
 void read_inputs (unsigned long now) {
-  debounce (btn_outer, read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, OUTER_BUTTON_ACTIVE_LOW), now);
-  debounce (btn_inner, read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG, INNER_BUTTON_ACTIVE_LOW), now);
+  debounce (btn_outer, read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, outer_active_low), now);
+  debounce (btn_inner, read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG, inner_active_low), now);
   if (btn_outer.edge) Serial.println (F("outer button: PRESSED"));
   if (btn_inner.edge) Serial.println (F("inner button: PRESSED"));
 
@@ -554,12 +559,16 @@ void setup () {
   delay (5);
   Serial.print (F("SunDial SpinStop v")); Serial.println (FW_VERSION);
   bool select_held = digitalRead (CHOOSE) == LOW;
-  if (read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, OUTER_BUTTON_ACTIVE_LOW)) Serial.println (F("WARNING: outer button reads PRESSED at boot - check its wire / pull-up"));
-  if (read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG, INNER_BUTTON_ACTIVE_LOW)) Serial.println (F("WARNING: inner button reads PRESSED at boot - check its wire / pull-up"));
+  bool outer_flipped = read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, outer_active_low);
+  bool inner_flipped = read_button_raw (INNER_BUTTON_PIN, INNER_BUTTON_ANALOG, inner_active_low);
+  if (outer_flipped) { outer_active_low = !outer_active_low; Serial.println (F("outer button rests the other way round - polarity flipped (blue flash)")); }
+  if (inner_flipped) { inner_active_low = !inner_active_low; Serial.println (F("inner button rests the other way round - polarity flipped (purple flash)")); }
 
   for (int i = 0; i < LED_BOARDS; i++) { pwmBoard[i].begin (); pwmBoard[i].setOscillatorFrequency (27000000); pwmBoard[i].setPWMFreq (50); }
   all_leds (0, 0, 0);
   digitalWrite (STEPPER_O_ENABLE, HIGH); digitalWrite (STEPPER_I_ENABLE, HIGH);
+  if (outer_flipped) { all_leds (0, 0, 255); delay (1500); all_leds (0, 0, 0); delay (400); }      // visible in the prop, where there is no serial
+  if (inner_flipped) { all_leds (160, 0, 255); delay (1500); all_leds (0, 0, 0); delay (400); }
   if (select_held) map_mode ();
   delay (2000);
   all_leds (255, 255, 255);
