@@ -46,7 +46,7 @@
 #define SPRITE_BAUD    9600
 #define LAST_CLUE      5          // files 001..005
 #define SOLVED_FILE    6          // file shown after the fifth solve (0 = back to the idle sky)
-#define TRANSITION_BASE 10        // play-once transition files: clue N -> file (TRANSITION_BASE + N), solved -> +SOLVED_FILE. 0 = no transitions
+#define TRANSITION_BASE 0         // v1.2.0: 0 = no transition files. The 2026-10-07 clips 001..005 fade their own words in and out, so each clue is ONE looping file. (10 = play-once files 011..016 as in v1.1.0)
 #define MQTT_RETRY_MS  5000UL
 
 static const char* OTA_PASSWORD = WIFI_PASS;   // protocol: OTA password = Wi-Fi password

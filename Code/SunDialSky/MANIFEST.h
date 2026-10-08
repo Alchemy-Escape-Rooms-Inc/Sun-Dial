@@ -5,7 +5,7 @@
 #pragma once
 
 #define DEVICE_NAME           "SunDialSky"
-#define FIRMWARE_VERSION      "1.1.0"
+#define FIRMWARE_VERSION      "1.2.0"
 #define BOARD_TYPE            "ESP32-S3"
 #define ROOM                  "MermaidsTale"
 #define DESCRIPTION           "Drives the sky-writing video beside the SunDial (MedeaWiz Sprite DV-S1 showing Red Beard's ship in the distance). Listens to the retained MermaidsTale/SunDial/Clue from the SunDial bridge and tells the player which file to loop: 000 = plain sky (idle), 001..005 = the clue for question 1..5 written in the clouds, 006 = solved; 011..016 = play-once transition clips (old words fade out, new fade in) sent right after the new hold file so the hand-over is seamless. Serial 0xFC select-loop-file, so a clue HOLDS on screen until the next one."
