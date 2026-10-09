@@ -58,15 +58,21 @@ Clue 0 (reset) is just `0xFC 0`, a hard cut back to the plain sky.
   rigging never crosses the letters. Two lines max.
 - Fades: 2 s linear opacity. Nothing else animates.
 
-## Words (2026-10-07 riddle set, matches SpinStop v3.3.0 STEPS; four lines each, upper-left cloud band)
+## Words (2026-10-09 "statement" set, owner's pick; matches SpinStop v3.3.0+ STEPS; five lines each, upper-left cloud band, 34 px)
+
+The riddles never tell players to count. Only the fifth line hints that the
+answer has company (or, for the trident, none); Evalee's hint ladder carries
+the counting. Build kit (build.sh, base.mp4, scr.ttf) and the four rejected
+wordings sit in `Downloads/SunDial_Clue_Videos/draft_*`; the chosen set is
+`draft_cryptic`.
 
 | Question | Clue in the clouds |
 |---|---|
-| 1 lighthouse -> bottle (3) | Like the light, I send word across the water. A neck but no head. A mouth but no voice. |
-| 2 crab+seahorse -> turtle (7) | Born beneath the sand. Raised beneath the waves. I never leave home, yet I am never home. |
-| 3 lighthouse+anchor -> coconut (9) | Three eyes, yet blind. A beard, yet no face. I wait up high, then fall without warning. |
-| 4 shark+crab -> skull (4) | I once held every secret a pirate knew. Now I am empty, and I cannot stop grinning. |
-| 5 shark+seahorse -> trident (1) | Three teeth, but I have never tasted a thing. The one who holds me rules all that swim. |
+| 1 lighthouse -> bottle (3) | One speaks in light. I speak in ink. A neck but no head. A mouth but no voice. I did not wash up alone. |
+| 2 crab+seahorse -> turtle (7) | Born beneath the sand. Raised beneath the waves. I never leave home, yet I am never home. I did not hatch alone. |
+| 3 lighthouse+anchor -> coconut (9) | Three eyes, yet blind. A beard, yet no face. I wait up high, then fall without warning. I do not wait alone. |
+| 4 shark+crab -> skull (4) | I once held every secret a pirate knew. Now I am empty, and I cannot stop grinning. I do not grin alone. |
+| 5 shark+seahorse -> trident (1) | Three teeth, but I have never tasted a thing. The one who holds me rules all that swim. I share my throne with none. |
 | solved | The sun has spoken |
 
 ## Prompts
