@@ -293,6 +293,44 @@ void pollNanoSerial() {
   }
 }
 
+// 4.6.1: bench tools for the Nano serial wire (GPIO 18).
+// SCOPE = watch the pin for 200 ms and report what is on it: number of edges,
+// how long it sits HIGH, the shortest pulse, and how many pulses fall in each
+// width band. 115200 baud text = pulses in multiples of ~8.7 us with long HIGH
+// rests; an I2C bus = ~5 us pulses non-stop; a floating wire = mains-rate junk.
+void scopeNanoPin() {
+  const unsigned long WINDOW_US = 200000UL;
+  unsigned long bands[6] = { 0, 0, 0, 0, 0, 0 };   // <6, 6-12, 12-30, 30-150, 150-2000, >2000 us
+  unsigned long edges = 0, highUs = 0, minPulse = 0xFFFFFFFFUL, maxLow = 0;
+  int last = digitalRead(NANO_RX_PIN);
+  unsigned long start = micros(), lastEdge = start, now = start;
+  while ((now = micros()) - start < WINDOW_US) {
+    int v = digitalRead(NANO_RX_PIN);
+    if (v == last) continue;
+    unsigned long w = now - lastEdge;
+    edges++;
+    if (last == HIGH) highUs += w; else if (w > maxLow) maxLow = w;
+    if (w < minPulse) minPulse = w;
+    int b = (w < 6) ? 0 : (w < 12) ? 1 : (w < 30) ? 2 : (w < 150) ? 3 : (w < 2000) ? 4 : 5;
+    bands[b]++;
+    last = v; lastEdge = now;
+  }
+  if (last == HIGH) highUs += now - lastEdge;
+  char buf[200];
+  snprintf(buf, sizeof(buf),
+           "[SCOPE] pin18 200ms: edges=%lu high=%lu%% minPulse=%luus maxLow=%luus bands<6:%lu 6-12:%lu 12-30:%lu 30-150:%lu 150-2000:%lu >2000:%lu now=%s",
+           edges, highUs / (WINDOW_US / 100), edges ? minPulse : 0, maxLow,
+           bands[0], bands[1], bands[2], bands[3], bands[4], bands[5], last == HIGH ? "HIGH" : "LOW");
+  logLine(buf);
+}
+
+void setNanoBaud(long baud) {                      // BAUD n = listen at another speed (until reboot)
+  Serial1.end();
+  Serial1.begin(baud, SERIAL_8N1, NANO_RX_PIN, -1);
+  nanoLineLen = 0;
+  char buf[64]; snprintf(buf, sizeof(buf), "[NANO] listening at %ld baud", baud); logLine(buf);
+}
+
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   char msg[32] = {0};
   memcpy(msg, payload, min((unsigned int)31, length));
@@ -331,6 +369,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     resetSymbols();
     publishClue(0);                                            // 4.6.0: sky back to the idle boat
     pulseNano("PUZZLE_RESET");
+  } else if (strcmp(msg, "SCOPE") == 0) {                      // 4.6.1
+    scopeNanoPin();
+  } else if (strncmp(msg, "BAUD ", 5) == 0) {                  // 4.6.1
+    long b = atol(msg + 5);
+    if (b >= 1200 && b <= 1000000) setNanoBaud(b);
   } else if (strcmp(msg, "CLEAR_STATUS") == 0) {
     mqtt.publish(TOPIC_STAT, "OK");
     mqtt.publish(TOPIC_STAT, "", true);  // wipe retained

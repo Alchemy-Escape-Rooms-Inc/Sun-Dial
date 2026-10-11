@@ -7,7 +7,7 @@
 // ============================================================
 
 #define DEVICE_NAME           "SunDial"
-#define FIRMWARE_VERSION      "4.6.0"
+#define FIRMWARE_VERSION      "4.6.1"
 #define BOARD_TYPE            "ESP32-S3"
 #define ROOM                  "MermaidsTale"
 #define DESCRIPTION           "Stateless MQTT bridge for the SunDial puzzle: captures 6 pulse inputs from the Sand Dial Arduino via ISRs and publishes per-symbol true events plus a Wrong event on incorrect guesses; M3 owns dedupe, counting, SOLVED, and the totem trigger. 4.5.0: also pulses the controller Nano on GameStart/PUZZLE_RESET (guided mode restart) and mirrors the Nano serial (ring counts) to MQTT. 4.6.0: publishes the current clue number (retained MermaidsTale/SunDial/Clue = 0 idle, 1..5 question, solved) parsed from the SpinStop controller v3.1 step lines, for the SunDialSky video board"
@@ -23,7 +23,7 @@
 
 #define SUBSCRIBE_TOPICS      "MermaidsTale/SunDial/command, MermaidsTale/GameStart"
 #define PUBLISH_TOPICS        "MermaidsTale/SunDial/status, MermaidsTale/SunDial/log, MermaidsTale/SunDial/Bottle, MermaidsTale/SunDial/Crab, MermaidsTale/SunDial/Turtle, MermaidsTale/SunDial/Coconut, MermaidsTale/SunDial/Trident, MermaidsTale/SunDial/Wrong, MermaidsTale/SunDial/Outer, MermaidsTale/SunDial/Inner, MermaidsTale/SunDial/nano, MermaidsTale/SunDial/Clue"
-#define SUPPORTED_COMMANDS    "PING, STATUS, RESET, PUZZLE_RESET, CLEAR_STATUS"
+#define SUPPORTED_COMMANDS    "PING, STATUS, RESET, PUZZLE_RESET, CLEAR_STATUS, SCOPE, BAUD n"
 
 // Over-the-air updates (MANDATORY per mqtt-protocol.md, 2026-09-22). Added 4.6.0.
 // Password = the Wi-Fi password (OTA_PASSWORD aliases WIFI_PASS in the sketch).
