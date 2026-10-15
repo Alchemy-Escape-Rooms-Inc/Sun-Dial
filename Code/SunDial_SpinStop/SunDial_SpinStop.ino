@@ -1,4 +1,4 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.4.2  (2026-10-15)
+//  SunDial_SpinStop  -  controller Nano firmware v3.4.3  (2026-10-15)
 //
 //  THE GAME (owner's flow, 2026-10-07 - "show spin, then the players dial"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, the outer
@@ -62,7 +62,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.4.2"
+#define FW_VERSION "3.4.3"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -116,6 +116,7 @@
 #define OUTER_PARK_OFFSET_MS   0       // + stops a little later after each stop boundary (tune if symbols sit off-centre)
 #define BUTTON_DEBOUNCE_MS     30
 #define HOLD_REPEAT_MS         600     // a wheel button held this long keeps stepping; a normal press = exactly one stop
+#define INNER_STOPS            10      // numbers on the inner ring (count wraps here if the home mark is missed)
 #define INNER_LEAVE_MS         40      // inner beam must stay clear this long before the nudge counts as off the tooth
 #define SEEK_TIMEOUT_MS        90000UL // homing / show lap longer than this stops the motor (select retries)
 #define MARK_SETTLE_MS         40      // ignore home-mark chatter this long after an edge
@@ -180,7 +181,6 @@ int  inner_counter = 1;
 int  prev_inner_counter_state = 0;
 unsigned long inner_gate_ms = 0;
 unsigned long inner_leave_ms = 0;
-bool inner_count_armed = false;
 
 int  current_step = 0;
 bool solved_sym[NUM_SYMBOLS];
@@ -324,7 +324,15 @@ void drive_inner () {
     case IN_STOPPED: inner_stop ();  break;
     case IN_SNAP:
       inner_on = !tooth;
-      if (tooth) { inner_state = IN_STOPPED; Serial.println (F("inner: stopped")); }
+      if (tooth) {                              // landed on the next number: count it here, once
+        inner_state = IN_STOPPED;
+        inner_counter++;
+        if (digitalRead (IR_INNER_0) == HIGH || inner_counter > INNER_STOPS) inner_counter = 1;
+        Serial.println (F("inner: stopped"));
+        Serial.print (F("inner counter = ")); Serial.print (inner_counter);
+        Serial.print (F("  (home mark ")); Serial.print (digitalRead (IR_INNER_0) == HIGH ? F("ON)") : F("off)"));
+        Serial.println ();
+      }
       break;
     case IN_NUDGE:                              // the beam flickers at a tooth edge: wait until it is clearly off
       inner_run ();
@@ -333,20 +341,6 @@ void drive_inner () {
       else if (millis () - inner_leave_ms >= INNER_LEAVE_MS) inner_state = IN_SNAP;
       break;
   }
-}
-void count_inner (unsigned long now) {
-  if (now - inner_gate_ms <= 105) return;       // 105 ms gate like the original sketch
-  inner_gate_ms = now;
-  int st = digitalRead (IR_INNER_COUNTER);
-  // one count per nudge: any further rising edge is beam flicker at the
-  // tooth edge (v3.4.1 counted 4 stops for 2 presses)
-  if (st == HIGH && prev_inner_counter_state == LOW && inner_count_armed) {
-    inner_count_armed = false;
-    inner_counter++;
-    if (digitalRead (IR_INNER_0) == HIGH) inner_counter = 1;
-    Serial.print (F("inner counter = ")); Serial.println (inner_counter);
-  }
-  prev_inner_counter_state = st;
 }
 
 // Blocking homing, one wheel at a time (outer to its mark, then inner to 1).
@@ -441,7 +435,6 @@ void read_inputs (unsigned long now) {
   choose_prev = ch;
   if (choose_edge) Serial.println (F("choose pin: PRESSED"));
 
-  count_inner (now);
 
   while (Serial.available ()) {
     char c = Serial.read ();
@@ -610,7 +603,7 @@ void loop () {
     case PH_PLAY: {
       bool idle = (outer_state == OUT_STOPPED && inner_state == IN_STOPPED);   // one wheel at a time
       if (idle && wants_step (btn_outer, now)) outer_nudge (now);       // press = one stop, hold = keep stepping
-      else if (idle && wants_step (btn_inner, now)) { inner_state = IN_NUDGE; inner_leave_ms = 0; inner_count_armed = true; }
+      else if (idle && wants_step (btn_inner, now)) { inner_state = IN_NUDGE; inner_leave_ms = 0; }
       drive_outer (now);
       drive_inner ();
       paint_play (now);
