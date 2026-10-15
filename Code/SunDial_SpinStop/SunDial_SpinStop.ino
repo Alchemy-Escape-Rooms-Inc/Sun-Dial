@@ -1,4 +1,4 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.4.1  (2026-10-07)
+//  SunDial_SpinStop  -  controller Nano firmware v3.4.2  (2026-10-15)
 //
 //  THE GAME (owner's flow, 2026-10-07 - "show spin, then the players dial"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, the outer
@@ -62,7 +62,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.4.1"
+#define FW_VERSION "3.4.2"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -115,6 +115,8 @@
 #define OUTER_LAP_MS           0       // 0 = measure on the show lap; or bake in the "outer lap = N ms" serial value
 #define OUTER_PARK_OFFSET_MS   0       // + stops a little later after each stop boundary (tune if symbols sit off-centre)
 #define BUTTON_DEBOUNCE_MS     30
+#define HOLD_REPEAT_MS         600     // a wheel button held this long keeps stepping; a normal press = exactly one stop
+#define INNER_LEAVE_MS         40      // inner beam must stay clear this long before the nudge counts as off the tooth
 #define SEEK_TIMEOUT_MS        90000UL // homing / show lap longer than this stops the motor (select retries)
 #define MARK_SETTLE_MS         40      // ignore home-mark chatter this long after an edge
 #define PULSE_PERIOD_MS        1400    // breathing period of the clue lights
@@ -177,12 +179,14 @@ InnerState inner_state = IN_STOPPED;
 int  inner_counter = 1;
 int  prev_inner_counter_state = 0;
 unsigned long inner_gate_ms = 0;
+unsigned long inner_leave_ms = 0;
+bool inner_count_armed = false;
 
 int  current_step = 0;
 bool solved_sym[NUM_SYMBOLS];
 
 // buttons
-struct Button { bool state, prev, raw_prev, edge; unsigned long raw_since; };
+struct Button { bool state, prev, raw_prev, edge; unsigned long raw_since, pressed_at; };
 Button btn_outer, btn_inner;
 // Whatever level a button pin rests at when the board powers up is taken as
 // "not pressed" (nobody holds a wheel button at power-up), so a pad with a
@@ -322,9 +326,11 @@ void drive_inner () {
       inner_on = !tooth;
       if (tooth) { inner_state = IN_STOPPED; Serial.println (F("inner: stopped")); }
       break;
-    case IN_NUDGE:
+    case IN_NUDGE:                              // the beam flickers at a tooth edge: wait until it is clearly off
       inner_run ();
-      if (!tooth) inner_state = IN_SNAP;
+      if (tooth) inner_leave_ms = 0;
+      else if (inner_leave_ms == 0) inner_leave_ms = millis () | 1;
+      else if (millis () - inner_leave_ms >= INNER_LEAVE_MS) inner_state = IN_SNAP;
       break;
   }
 }
@@ -332,7 +338,10 @@ void count_inner (unsigned long now) {
   if (now - inner_gate_ms <= 105) return;       // 105 ms gate like the original sketch
   inner_gate_ms = now;
   int st = digitalRead (IR_INNER_COUNTER);
-  if (st == HIGH && prev_inner_counter_state == LOW) {
+  // one count per nudge: any further rising edge is beam flicker at the
+  // tooth edge (v3.4.1 counted 4 stops for 2 presses)
+  if (st == HIGH && prev_inner_counter_state == LOW && inner_count_armed) {
+    inner_count_armed = false;
     inner_counter++;
     if (digitalRead (IR_INNER_0) == HIGH) inner_counter = 1;
     Serial.print (F("inner counter = ")); Serial.println (inner_counter);
@@ -415,6 +424,11 @@ void debounce (Button& b, bool raw, unsigned long now) {
   b.prev = b.state;
   if (now - b.raw_since >= BUTTON_DEBOUNCE_MS) b.state = raw;
   b.edge = b.state && !b.prev;
+  if (b.edge) b.pressed_at = now;
+}
+// press = one stop; only a button still held after HOLD_REPEAT_MS keeps stepping
+bool wants_step (const Button& b, unsigned long now) {
+  return b.edge || (b.state && now - b.pressed_at >= HOLD_REPEAT_MS);
 }
 void read_inputs (unsigned long now) {
   debounce (btn_outer, read_button_raw (OUTER_BUTTON_PIN, OUTER_BUTTON_ANALOG, outer_active_low), now);
@@ -595,8 +609,8 @@ void loop () {
 
     case PH_PLAY: {
       bool idle = (outer_state == OUT_STOPPED && inner_state == IN_STOPPED);   // one wheel at a time
-      if (idle && (btn_outer.edge || btn_outer.state)) outer_nudge (now);       // press = one stop, hold = keep stepping
-      else if (idle && (btn_inner.edge || btn_inner.state)) inner_state = IN_NUDGE;
+      if (idle && wants_step (btn_outer, now)) outer_nudge (now);       // press = one stop, hold = keep stepping
+      else if (idle && wants_step (btn_inner, now)) { inner_state = IN_NUDGE; inner_leave_ms = 0; inner_count_armed = true; }
       drive_outer (now);
       drive_inner ();
       paint_play (now);
