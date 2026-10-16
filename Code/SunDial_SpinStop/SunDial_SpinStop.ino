@@ -1,4 +1,7 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.5.0  (2026-10-16)
+//  SunDial_SpinStop  -  controller Nano firmware v3.5.1  (2026-10-16)
+//
+//  v3.5.1: no white "resting on" light (RESTING_LIGHT 0) - during play only
+//  solved symbols (green) are lit.
 //
 //  v3.5.0: clue lights OFF (CLUE_LIGHTS 0) - only the sky riddle gives the
 //  clue now; twinkle after a right answer is a smooth gold shimmer instead
@@ -67,7 +70,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.5.0"
+#define FW_VERSION "3.5.1"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -129,7 +132,8 @@
 #define ATTRACT_STEP_MS        600
 #define TWINKLE_MS             1500
 #define TWINKLE_PERIOD_MS      900     // v3.5.0 shimmer: one breath per light
-#define CLUE_LIGHTS            0       // v3.5.0: 0 = clue lights off (owner: confusing); the sky riddle carries the clue. 1 = pulse gold again
+#define RESTING_LIGHT          0       // v3.5.1: 0 = no white light on the symbol the outer rests on (only the 5 answers have known spots, so it gave the answers away)
+#define CLUE_LIGHTS            0      // v3.5.0: 0 = clue lights off (owner: confusing); the sky riddle carries the clue. 1 = pulse gold again
 #define FEEDBACK_MS            2000    // green / red hold
 
 // ---------------------------------------------------------------- symbols and lights
@@ -238,7 +242,7 @@ void paint_play (unsigned long now) {
   float ph = (float)(now % PULSE_PERIOD_MS) / (float)PULSE_PERIOD_MS;
   float tri = ph < 0.5f ? ph * 2.0f : (1.0f - ph) * 2.0f;
   uint8_t level = (uint8_t)(20 + tri * tri * 235);
-  int white = (outer_state == OUT_STOPPED) ? symbol_at (outer_pos) : -1;
+  int white = (RESTING_LIGHT && outer_state == OUT_STOPPED) ? symbol_at (outer_pos) : -1;
   for (int s = 0; s < NUM_SYMBOLS; s++) {
     if (solved_sym[s])       sym_led (s, 0, 255, 0);
     else if (CLUE_LIGHTS && is_clue (s)) sym_led (s, level, (uint8_t)((uint16_t)level * 2 / 3), 0);
