@@ -1,4 +1,9 @@
-//  SunDial_SpinStop  -  controller Nano firmware v3.4.3  (2026-10-15)
+//  SunDial_SpinStop  -  controller Nano firmware v3.5.0  (2026-10-16)
+//
+//  v3.5.0: clue lights OFF (CLUE_LIGHTS 0) - only the sky riddle gives the
+//  clue now; twinkle after a right answer is a smooth gold shimmer instead
+//  of random blinks. Everything below that mentions pulsing clue lights
+//  applies only with CLUE_LIGHTS 1.
 //
 //  THE GAME (owner's flow, 2026-10-07 - "show spin, then the players dial"):
 //    1. Select (or the bridge trigger) starts a game: the dial homes, the outer
@@ -62,7 +67,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.4.3"
+#define FW_VERSION "3.5.0"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -123,6 +128,8 @@
 #define PULSE_PERIOD_MS        1400    // breathing period of the clue lights
 #define ATTRACT_STEP_MS        600
 #define TWINKLE_MS             1500
+#define TWINKLE_PERIOD_MS      900     // v3.5.0 shimmer: one breath per light
+#define CLUE_LIGHTS            0       // v3.5.0: 0 = clue lights off (owner: confusing); the sky riddle carries the clue. 1 = pulse gold again
 #define FEEDBACK_MS            2000    // green / red hold
 
 // ---------------------------------------------------------------- symbols and lights
@@ -234,7 +241,7 @@ void paint_play (unsigned long now) {
   int white = (outer_state == OUT_STOPPED) ? symbol_at (outer_pos) : -1;
   for (int s = 0; s < NUM_SYMBOLS; s++) {
     if (solved_sym[s])       sym_led (s, 0, 255, 0);
-    else if (is_clue (s))    sym_led (s, level, (uint8_t)((uint16_t)level * 2 / 3), 0);
+    else if (CLUE_LIGHTS && is_clue (s)) sym_led (s, level, (uint8_t)((uint16_t)level * 2 / 3), 0);
     else if (s == white)     { if (last_white != s) sym_led (s, 255, 255, 255); }
     else if (s == last_white) sym_led (s, 0, 0, 0);
   }
@@ -244,13 +251,23 @@ void repaint_all () {
   all_leds (0, 0, 0);
   for (int s = 0; s < NUM_SYMBOLS; s++) if (solved_sym[s]) sym_led (s, 0, 255, 0);
 }
+// v3.5.0: a smooth gold shimmer instead of random 60 ms blinks (owner: the old
+// one read as glitchy). Every light breathes on its own phase so they ripple,
+// and the whole thing fades in and out; solved symbols end green.
 void twinkle (unsigned long ms) {
   unsigned long t0 = millis ();
   while (millis () - t0 < ms) {
-    int bd = random (LED_BOARDS), i = random (LEDS_PER_BOARD);
-    set_led (bd, i, 255, 200, 40);
-    delay (60);
-    set_led (bd, i, 0, 0, 0);
+    unsigned long t = millis () - t0;
+    float env = t < 300 ? t / 300.0f : (t > ms - 400 ? (ms - t) / 400.0f : 1.0f);
+    for (int bd = 0; bd < LED_BOARDS; bd++)
+      for (int i = 0; i < LEDS_PER_BOARD; i++) {
+        int n = bd * LEDS_PER_BOARD + i;
+        float ph = (float)((t + n * 233UL) % TWINKLE_PERIOD_MS) / (float)TWINKLE_PERIOD_MS;
+        float tri = ph < 0.5f ? ph * 2.0f : (1.0f - ph) * 2.0f;
+        float k = env * (0.15f + 0.85f * tri * tri);
+        set_led (bd, i, (uint8_t)(255 * k), (uint8_t)(170 * k), (uint8_t)(30 * k));
+      }
+    delay (20);
   }
   repaint_all ();
 }
