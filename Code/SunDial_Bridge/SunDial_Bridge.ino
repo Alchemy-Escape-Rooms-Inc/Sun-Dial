@@ -104,7 +104,7 @@ const char*    TOPIC_CLUE  = "MermaidsTale/SunDial/Clue";      // 4.6.0: current
 
 // 4.5.0 Nano link
 const int      TRIGGER_OUT_PIN   = 17;    // -> Nano A6
-const int      NANO_RX_PIN       = 18;    // <- Nano D1 via divider
+const int      NANO_RX_PIN       = 13;    // <- Nano D1 via divider (4.6.2: moved off GPIO 18, which sinks to 0 V when powered = damaged)
 const unsigned long TRIGGER_PULSE_MS     = 500;
 const unsigned long GAMESTART_GUARD_MS   = 3000;  // ignore GameStart this soon after subscribing (retained replay)
 const unsigned long NANO_MIRROR_MIN_GAP_MS = 50;  // ~20 lines/s max on /nano
@@ -318,8 +318,8 @@ void scopeNanoPin() {
   if (last == HIGH) highUs += now - lastEdge;
   char buf[200];
   snprintf(buf, sizeof(buf),
-           "[SCOPE] pin18 200ms: edges=%lu high=%lu%% minPulse=%luus maxLow=%luus bands<6:%lu 6-12:%lu 12-30:%lu 30-150:%lu 150-2000:%lu >2000:%lu now=%s",
-           edges, highUs / (WINDOW_US / 100), edges ? minPulse : 0, maxLow,
+           "[SCOPE] pin%d 200ms: edges=%lu high=%lu%% minPulse=%luus maxLow=%luus bands<6:%lu 6-12:%lu 12-30:%lu 30-150:%lu 150-2000:%lu >2000:%lu now=%s",
+           NANO_RX_PIN, edges, highUs / (WINDOW_US / 100), edges ? minPulse : 0, maxLow,
            bands[0], bands[1], bands[2], bands[3], bands[4], bands[5], last == HIGH ? "HIGH" : "LOW");
   logLine(buf);
 }
