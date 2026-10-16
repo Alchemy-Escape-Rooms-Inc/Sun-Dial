@@ -120,6 +120,23 @@ const char* const SYMBOL_TOPICS[NUM_PINS] = {
   "MermaidsTale/SunDial/Wrong"   // HOUSE_6: wrong-guess pulse (4.4.0)
 };
 
+// 4.7.0: SOLVES FROM THE SERIAL LINE. The five HOUSE wires on the bridge side
+// no longer match HOUSE_PINS (10-16: the bottle answer arrived on GPIO 5 =
+// Crab) and the owner will not rewire, so the symbol topic now comes from the
+// controller's own text: "step=N ..." says which question is open and
+// "choose ... -> CORRECT" says it was solved. The HOUSE pins are still read
+// and logged ("[PIN n HIGH] (not published)") but publish nothing.
+// 0 = old behaviour (HOUSE wires publish).
+#define SOLVE_FROM_SERIAL 1
+const char* const STEP_TOPICS[5] = {      // SpinStop v3.3+ step order
+  "MermaidsTale/SunDial/Bottle",          // 1 bottle
+  "MermaidsTale/SunDial/Turtle",          // 2 turtle
+  "MermaidsTale/SunDial/Coconut",         // 3 coconut
+  "MermaidsTale/SunDial/Crab",            // 4 skull (topic keeps its old name)
+  "MermaidsTale/SunDial/Trident"          // 5 trident
+};
+int currentStep = 0;                      // 1..5 while a question is open, 0 = none
+
 const unsigned long HEARTBEAT_INTERVAL_MS = HEARTBEAT_MS;  // 5 seconds, from MANIFEST.h
 
 // Hang recovery (4.3.0). The watchdog timeout must exceed the worst
@@ -264,9 +281,22 @@ void handleNanoLine(char* line) {
   // new question starts, "SOLVED - all symbols" at the end and "attract ..." when
   // idle. Publish the clue number RETAINED so the sky video board (SunDialSky)
   // can pick the right clouds even after a reboot.
-  if (sscanf(line, "step=%d", &n) == 1) { publishClue(n); }
-  else if (strncmp(line, "SOLVED", 6) == 0) { publishClueStr("solved"); }
-  else if (strncmp(line, "attract", 7) == 0) { publishClue(0); }
+  if (sscanf(line, "step=%d", &n) == 1) { publishClue(n); currentStep = (n >= 1 && n <= 5) ? n : 0; }
+  else if (strncmp(line, "SOLVED", 6) == 0) { publishClueStr("solved"); currentStep = 0; }
+  else if (strncmp(line, "attract", 7) == 0) { publishClue(0); currentStep = 0; }
+  else if (strncmp(line, "game start", 10) == 0) { currentStep = 0; }
+#if SOLVE_FROM_SERIAL
+  if (strncmp(line, "choose ", 7) == 0 && strstr(line, "-> CORRECT")) {
+    char buf[96];
+    if (currentStep >= 1 && currentStep <= 5) {
+      if (mqtt.connected()) mqtt.publish(STEP_TOPICS[currentStep - 1], "true", false);
+      snprintf(buf, sizeof(buf), "[SOLVE] step %d -> %s = true", currentStep, STEP_TOPICS[currentStep - 1]);
+    } else {
+      snprintf(buf, sizeof(buf), "[SOLVE] CORRECT but step unknown (bridge rebooted mid-game?) - nothing sent");
+    }
+    logLine(buf);
+  }
+#endif
   // The Nano prints a bare number + " off" per LED at boot; skip that chatter.
   if (strcmp(line, "off") == 0 || (line[0] >= '0' && line[0] <= '9' && line[1] == 0)) return;
   unsigned long now = millis();
@@ -334,6 +364,17 @@ void setNanoBaud(long baud) {                      // BAUD n = listen at another
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   char msg[32] = {0};
   memcpy(msg, payload, min((unsigned int)31, length));
+
+  // 4.7.0: after a bridge reboot mid-game, take the open step back from our
+  // own retained Clue so the next CORRECT still names the right symbol.
+  if (strcmp(topic, TOPIC_CLUE) == 0) {
+    int n = atoi(msg);
+    if (currentStep == 0 && n >= 1 && n <= 5) {
+      currentStep = n;
+      char buf[48]; snprintf(buf, sizeof(buf), "[SOLVE] step %d restored from retained Clue", n); logLine(buf);
+    }
+    return;
+  }
 
   if (strcmp(topic, TOPIC_GAMESTART) == 0) {
     // 4.5.0: any GameStart payload restarts the dial - unless it is the
@@ -414,6 +455,7 @@ void ensureMqtt() {
   if (mqtt.connect(clientId.c_str(), TOPIC_STAT, 0, true, "OFFLINE")) {
     mqtt.subscribe(TOPIC_CMD);
     mqtt.subscribe(TOPIC_GAMESTART);           // 4.5.0
+    mqtt.subscribe(TOPIC_CLUE);                // 4.7.0: retained, restores currentStep after a reboot
     subscribedMs = millis();
     mqtt.publish(TOPIC_STAT, "ONLINE", true);  // retained: overwrite stale OFFLINE
     Serial.println("[MQTT] ONLINE published");
@@ -495,7 +537,9 @@ void loop() {
 
     if (edgeSeenMs[i] != 0 && nowMs - edgeSeenMs[i] >= EDGE_CONFIRM_MS) {
       edgeSeenMs[i] = 0;
-      if (digitalRead(HOUSE_PINS[i]) == HIGH) {
+      if (digitalRead(HOUSE_PINS[i]) == HIGH && SOLVE_FROM_SERIAL) {
+        Serial.printf("[PIN %d HIGH] (not published - SOLVE_FROM_SERIAL)\n", HOUSE_PINS[i]);
+      } else if (digitalRead(HOUSE_PINS[i]) == HIGH) {
         mqtt.publish(SYMBOL_TOPICS[i], "true", false);
         Serial.printf("[PIN %d HIGH] %s = true\n",
                       HOUSE_PINS[i], SYMBOL_TOPICS[i]);
