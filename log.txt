@@ -587,3 +587,17 @@ STATE FOR NEXT SESSION:
 [2026-10-16 17:26] CORRECTION: GPIO 18 probably NOT damaged. Pin 13 read HIGH unwired (17:23) and flat LOW as soon as the divider wire moved to it (17:25) = same as 18. The divider path itself cannot source current: open 4.3 V, 0.4 V with the 3.3k load -> TX1-to-junction resistance far above 2.2k (wrong resistor value or bad joint). Asked owner for ohms TX1 -> junction (power off), expect ~2200. (Times in the 17:40 entry above were ~17:22.)
 [2026-10-16 17:52] SERIAL LINK BACK: ground resistor swapped for 4.7k (TX 2.2k measured 2.17k; old ground part suspect - colours unreadable, never measured). Divider now 2.2k/4.7k = ~3.4 V on GPIO 13. SCOPE pin13 HIGH 100%. Full chain live 17:51: Clue 1 -> sky 001, outer 2/inner 3 select = correct, show lap 13310 ms, Clue 2 -> sky 002 (once each). NEW BUG: step 1 (bottle, HOUSE_1 D2 -> GPIO4) published SunDial/Crab (GPIO5) -> HOUSE wires shifted on the bridge side; 15:42 'fake' Crab was probably the owner's real step-1 solve. Owner to check D2..D6 -> GPIO 4,5,6,7,15.
 [2026-10-16 17:59] Bridge 4.7.0 (b0d5a0e) FLASHED OTA, VER4.7.0 verified. Owner will NOT rewire the HOUSE lines -> SOLVE_FROM_SERIAL 1: symbol topic comes from controller serial (step=N + 'choose ... -> CORRECT' -> STEP_TOPICS: 1 Bottle, 2 Turtle, 3 Coconut, 4 Crab(skull), 5 Trident); HOUSE edges only logged to USB serial. Bridge subscribes its own retained Clue to restore the open step after a reboot (seen live: '[SOLVE] step 2 restored'). Every solve now logs '[SOLVE] step N -> topic' on SunDial/log. Risk: if the serial wire dies, NO solves reach M3 (before, HOUSE wires were independent). Manifest synced.
+
+## 2026-11-11 15:50 - "bottle correct but same clue repeated" (review, no code change)
+Wire log mqtt_2026-11-11_151523.txt:
+- Bridge ran fine 12h+ (UP43966s), dropped 15:36:25 (heartbeats stop).
+- 15:45:14 bridge rebooted on its own (UP4s at 15:45:18) while the controller Nano kept running
+  (Nano printed "outer lap = 13316 ms" + step=1 only 5 s later = it was already homing).
+- 15:45:19 [CLUE] 1 -> sky "hold 001" OK.
+- 15:45:41 bridge LWT OFFLINE (died ~15:45:20-25). No heartbeats since, ping = host unreachable,
+  and its own 2-min offline self-reboot never brought it back => no power / stuck before Wi-Fi.
+- Bottle was answered AFTER the bridge died, so "choose -> CORRECT" + "step=2" never reached MQTT:
+  Clue stayed 1 (sky keeps looping the bottle riddle) and M3 never got SunDial/Bottle=true.
+Suspect: bridge power (brownout when the wheels move? / loose 5V), not game logic.
+After it is back: PUZZLE_RESET before testing - retained Clue=1 would make the bridge think step 1 is open
+while the Nano is on step 2.
