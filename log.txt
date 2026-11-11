@@ -601,3 +601,11 @@ Wire log mqtt_2026-11-11_151523.txt:
 Suspect: bridge power (brownout when the wheels move? / loose 5V), not game logic.
 After it is back: PUZZLE_RESET before testing - retained Clue=1 would make the bridge think step 1 is open
 while the Nano is on step 2.
+
+## 2026-11-11 16:05 - "7 turtle read as incorrect" -> controller v3.5.2 (built, committed)
+Wire log 15:58: step 2 (turtle, outer 6 / inner 7). Inner presses: 0.94, 0.95, 1.90, 0.92, 0.94 s.
+The 1.90 s press = ring moved TWO numbers, beam saw one tooth -> counter said 6 while the ring showed 7
+-> choose = wrong. Outer was correct (6). Bridge was online for this run (bottle solve reached M3).
+v3.5.2: time every inner one-stop move; a move ~2x the learned time (default 950 ms) adds the missed stop(s)
+and prints "inner: move took N ms = K stops (missed tooth counted)". Wrap = modulo 10, home mark still forces 1.
+Still worth checking which tooth gets missed (likely the one between 3 and 5 on this run) - weak tooth / beam alignment.

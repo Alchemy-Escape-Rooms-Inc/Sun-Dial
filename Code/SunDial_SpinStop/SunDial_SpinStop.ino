@@ -70,7 +70,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.5.1"
+#define FW_VERSION "3.5.2"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -125,6 +125,7 @@
 #define BUTTON_DEBOUNCE_MS     30
 #define HOLD_REPEAT_MS         600     // a wheel button held this long keeps stepping; a normal press = exactly one stop
 #define INNER_STOPS            10      // numbers on the inner ring (count wraps here if the home mark is missed)
+#define INNER_STEP_MS          950     // v3.5.2: normal one-stop inner move time (11-11 log: 0.92-0.97 s); learned as it plays
 #define INNER_LEAVE_MS         40      // inner beam must stay clear this long before the nudge counts as off the tooth
 #define SEEK_TIMEOUT_MS        90000UL // homing / show lap longer than this stops the motor (select retries)
 #define MARK_SETTLE_MS         40      // ignore home-mark chatter this long after an edge
@@ -192,6 +193,8 @@ int  inner_counter = 1;
 int  prev_inner_counter_state = 0;
 unsigned long inner_gate_ms = 0;
 unsigned long inner_leave_ms = 0;
+unsigned long inner_nudge_ms = 0;              // v3.5.2: when the current one-stop move started (0 = not a nudge)
+unsigned long inner_step_ms = INNER_STEP_MS;   // v3.5.2: learned one-stop time
 
 int  current_step = 0;
 bool solved_sym[NUM_SYMBOLS];
@@ -347,8 +350,22 @@ void drive_inner () {
       inner_on = !tooth;
       if (tooth) {                              // landed on the next number: count it here, once
         inner_state = IN_STOPPED;
-        inner_counter++;
-        if (digitalRead (IR_INNER_0) == HIGH || inner_counter > INNER_STOPS) inner_counter = 1;
+        int moved = 1;
+        // v3.5.2: 11-11 one press took 1.90 s (two stops) and counted one, so the
+        // dial read 6 while the ring showed 7. A move that took about twice the
+        // normal time slid past a tooth the beam did not see: count it anyway.
+        if (inner_nudge_ms) {
+          unsigned long el = millis () - inner_nudge_ms;
+          if (el < inner_step_ms * 3 / 2) inner_step_ms = (inner_step_ms * 3 + el) / 4;   // normal move: keep learning
+          else {
+            moved = (int)((el + inner_step_ms / 2) / inner_step_ms);
+            Serial.print (F("inner: move took ")); Serial.print (el); Serial.print (F(" ms = "));
+            Serial.print (moved); Serial.println (F(" stops (missed tooth counted)"));
+          }
+          inner_nudge_ms = 0;
+        }
+        inner_counter = (inner_counter - 1 + moved) % INNER_STOPS + 1;
+        if (digitalRead (IR_INNER_0) == HIGH) inner_counter = 1;
         Serial.println (F("inner: stopped"));
         Serial.print (F("inner counter = ")); Serial.print (inner_counter);
         Serial.print (F("  (home mark ")); Serial.print (digitalRead (IR_INNER_0) == HIGH ? F("ON)") : F("off)"));
@@ -624,7 +641,7 @@ void loop () {
     case PH_PLAY: {
       bool idle = (outer_state == OUT_STOPPED && inner_state == IN_STOPPED);   // one wheel at a time
       if (idle && wants_step (btn_outer, now)) outer_nudge (now);       // press = one stop, hold = keep stepping
-      else if (idle && wants_step (btn_inner, now)) { inner_state = IN_NUDGE; inner_leave_ms = 0; }
+      else if (idle && wants_step (btn_inner, now)) { inner_state = IN_NUDGE; inner_leave_ms = 0; inner_nudge_ms = millis () | 1; }
       drive_outer (now);
       drive_inner ();
       paint_play (now);
