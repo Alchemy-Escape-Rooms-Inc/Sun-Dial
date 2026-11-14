@@ -621,3 +621,6 @@ v3.5.3: in IN_SNAP ignore any tooth seen in the first 40 % of the learned step t
 Also fixes the old "first press after homing only settles onto the 1 notch" leftover.
 Controller Nano not on USB here (no COM port) -> needs USB to flash:
   arduino-cli upload -p COMx --fqbn arduino:avr:nano:cpu=atmega328 --input-dir Code/SunDial_SpinStop/build
+
+## 2026-11-14 - controller v3.5.3 FLASHED
+Controller Nano on USB COM39 (CH340). Banner before: v3.5.1 (so v3.5.2 was never loaded either). Fresh compile 15180 B, uploaded, banner after: "SunDial SpinStop v3.5.3". Prop test pending: inner presses should count one per real stop (no +1 ~45 ms after PRESSED on the wire).
