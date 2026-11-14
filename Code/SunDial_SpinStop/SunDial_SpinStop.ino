@@ -70,7 +70,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-#define FW_VERSION "3.5.2"
+#define FW_VERSION "3.5.3"
 
 // ---------------------------------------------------------------- pins
 #define IR_OUTER_0        A2      // outer home mark (HIGH = mark in the beam)
@@ -347,6 +347,11 @@ void drive_inner () {
   switch (inner_state) {
     case IN_STOPPED: inner_stop ();  break;
     case IN_SNAP:
+      // v3.5.3: 11-13 log: a press counted +1 only ~45 ms later without the ring moving
+      // (ring rests on a tooth EDGE, the beam flickers, the nudge "left" and "landed"
+      // on the same tooth). A real stop takes ~950 ms, so ignore any tooth seen in the
+      // first 40% of a move and keep turning to the real next tooth.
+      if (inner_nudge_ms && millis () - inner_nudge_ms < inner_step_ms * 2 / 5) { inner_run (); break; }
       inner_on = !tooth;
       if (tooth) {                              // landed on the next number: count it here, once
         inner_state = IN_STOPPED;

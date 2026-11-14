@@ -609,3 +609,15 @@ The 1.90 s press = ring moved TWO numbers, beam saw one tooth -> counter said 6 
 v3.5.2: time every inner one-stop move; a move ~2x the learned time (default 950 ms) adds the missed stop(s)
 and prints "inner: move took N ms = K stops (missed tooth counted)". Wrap = modulo 10, home mark still forces 1.
 Still worth checking which tooth gets missed (likely the one between 3 and 5 on this run) - weak tooth / beam alignment.
+
+## 2026-11-13 19:20 - "correct answer marked wrong" -> controller v3.5.3 (built, committed, NOT flashed)
+Wire log 19:06-19:11 (mqtt_2026-11-11_203554.txt): inner count jumps +1 only ~45-50 ms after an
+"inner button: PRESSED" (19:07:58.360, 19:11:04.682, :27.025, :27.493, :30.716) - a real stop takes ~1 s,
+so the ring did not move; the counter runs ahead of the ring. Step 1 first try: ring showed 3, dial counted 4 -> wrong.
+Step 2: chose with ring on 7, dial counted 8 -> wrong. 19:11:22 home mark forced the count 2 -> 1 = proof it was one ahead.
+Cause: ring rests on a tooth EDGE; IN_NUDGE sees "off tooth" for 40 ms without moving, IN_SNAP then
+sees the same tooth flicker back on and counts it. Outer counts were right every time.
+v3.5.3: in IN_SNAP ignore any tooth seen in the first 40 % of the learned step time (~380 ms) of a press move.
+Also fixes the old "first press after homing only settles onto the 1 notch" leftover.
+Controller Nano not on USB here (no COM port) -> needs USB to flash:
+  arduino-cli upload -p COMx --fqbn arduino:avr:nano:cpu=atmega328 --input-dir Code/SunDial_SpinStop/build
